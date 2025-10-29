@@ -433,6 +433,7 @@ plt.show()
 # Seems like a logarithmic relationship. With a really heavy tail
 
 # %%
+
 from scipy.stats import yeojohnson
 
 df_train["Car_Age_transformed"] = yeojohnson(df_train["Car_Age"])[0]
@@ -491,6 +492,41 @@ corr.style.background_gradient(cmap='coolwarm')
 # %% [markdown]
 # # Preprocessing
 
+# %% [markdown]
+# ## Rare Category Analysis
+
+# %%
+high_cardinality_cols = ['Brand', 'Model', 'Location', 'Seller_name']
+
+for col in high_cardinality_cols:
+    print(f"\n{col} - Total unique values: {df_train[col].nunique()}")
+    value_counts = df_train[col].value_counts()
+    rare_threshold = len(df_train) * 0.002
+    rare_categories = value_counts[value_counts < rare_threshold]
+    print(f"Rare categories (< 0.2% of data or < {rare_threshold:.0f} occurrences): {len(rare_categories)}")
+    print(f"Top 10 values:\n{value_counts.head(10)}")
+
+# %% [markdown]
+# -----------------------------
+# Okay this is interesting. We could change all 'Rare' Brands to 'Rare' and encode them with one hot since there aren't that many unique...
+#
+# For model this won't work as there are too many. I think target encoding would be fine for this as it will give us the mean for the specific model.
+#
+# But for Seller_name this is a bit weird... I think a frequency encoding could work since this will allow us to deferentiate how "Big" a certain seller is. 
+#
+# Which in my opinion is the most valuable information.
+#
+#
+# Since there are too many of them.
+#
+# For the location  a target encoding would work wehll. As it *should* tell us the mean price fore a certain location.
+#
+#
+# ----------------------------------
+
+# %% [markdown]
+# ## Preprocessing Pipeline
+
 # %%
 df_cleaned.info()
 
@@ -504,18 +540,20 @@ df_cleaned["Body"].value_counts()
 # [] One hot encode the Fuel type
 # [] Ordinal Encode Condition field, Used, Reconditioned, New
 # [] One-hot encode Transmission field: Automatic, Manual, Tiptonic, Other transmission
-# [] Impute "Body" field with constant "Unknown"
+# [] Impute "Body" field with constant "Unknown" or something similiar
 # [] One-hot encode Body field: Hatchback,SUV / 4x4, Station wagon, MPV, CoupÃ©/Sports,Convertible
 # [] Bag of words the Description: https://stackoverflow.com/questions/30653642/combining-bag-of-words-and-other-features-in-one-model-using-sklearn-and-pandas
-# [] Bag of words the Edition: Edition (could try and use a small vocab for this one, i think it would be worth it)
+# [] Bag of words the Edition: Edition (could try and use a small vocab for this one, i think it would be worth it) or shove it into grid search ?
 
 # %%
-from sklearn.preprocessing import StandardScaler, RobustScaler, MinMaxScaler, PowerTransformer, OrdinalEncoder, OneHotEncoder
+from sklearn.preprocessing import StandardScaler, RobustScaler, MinMaxScaler, PowerTransformer, OrdinalEncoder, OneHotEncoder, TargetEncoder
 from sklearn.impute import SimpleImputer
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.compose import ColumnTransformer
 from datetime import datetime
 
+# %%
+#adds carAge
 class CarAgeTransformer(BaseEstimator, TransformerMixin):
     def __init__(self, current_year=2025):
         self.current_year = current_year
@@ -528,38 +566,44 @@ class CarAgeTransformer(BaseEstimator, TransformerMixin):
         X['Car_Age'] = self.current_year - X['Year']
         return X.drop(columns=['Year'])
 
-class YeoJohnsonPriceTransformer(BaseEstimator, TransformerMixin):
-    def __init__(self):
-        self.lambda_price = None
+
+# %%
+#not available in scikit learn so we need to create this one ourselves... :D
+class FrequencyEncoderTransformer(BaseEstimator, TransformerMixin):
+    def __init__(self, columns):
+        self.columns = columns
+        self.frequency_mappings_ = {}
 
     def fit(self, X, y=None):
-        if y is not None:
-            _, self.lambda_price = yeojohnson(y)
+        X = X.copy()
+        for col in self.columns:
+            if col in X.columns:
+                freq_map = X[col].value_counts().to_dict()
+                self.frequency_mappings_[col] = freq_map
         return self
 
-    def transform(self, X, y=None):
-        if y is None:
-            return X
-        y_transformed = yeojohnson(y, lmbda=self.lambda_price)
-        return X, y_transformed
+    def transform(self, X):
+        X = X.copy()
+        for col in self.columns:
+            if col in X.columns and col in self.frequency_mappings_:
+                X[col] = X[col].map(self.frequency_mappings_[col]).fillna(0)
+        return X
 
-    def inverse_transform(self, y_transformed):
-        from scipy.special import inv_boxcox
-        if self.lambda_price == 0:
-            return np.exp(y_transformed)
-        else:
-            return np.power(y_transformed * self.lambda_price + 1, 1 / self.lambda_price)
-
+# %%
 preprocessing_pipeline = Pipeline([
     ('add_car_age', CarAgeTransformer(current_year=2025)),
+    ('target_encode', ColumnTransformer([
+        ('model_location_encoder', TargetEncoder(categories='auto', target_type='continuous', smooth='auto', cv=5), ['Model', 'Location'])
+    ], remainder='passthrough')),
+    ('frequency_encode', FrequencyEncoderTransformer(columns=['Seller_name'])),
     ('impute_body', ColumnTransformer([
-        ('body_imputer', SimpleImputer(strategy='constant', fill_value='unknown'), ['Body']),#might try a better one later...
+        ('body_imputer', SimpleImputer(strategy='constant', fill_value='unknown'), ['Body']),
     ], remainder='passthrough')),
     ('ordinal_encoding', ColumnTransformer([
         ('condition_encoder', OrdinalEncoder(categories=[['used', 'reconditioned', 'new']], handle_unknown='use_encoded_value', unknown_value=-1), ['Condition']),
     ], remainder='passthrough')),
     ('one_hot_encoding', ColumnTransformer([
-        #dropping one col to remove multicolinearity: https://stats.stackexchange.com/questions/231285/dropping-one-of-the-columns-when-using-one-hot-encoding
+        ('brand_encoder', OneHotEncoder(drop='first', sparse_output=False, handle_unknown='infrequent_if_exist', min_frequency=0.005), ['Brand']),
         ('fuel_encoder', OneHotEncoder(drop='first', sparse_output=False, handle_unknown='ignore'), ['Fuel']),
         ('transmission_encoder', OneHotEncoder(drop='first', sparse_output=False, handle_unknown='ignore'), ['Transmission']),
         ('body_encoder', OneHotEncoder(drop='first', sparse_output=False, handle_unknown='ignore'), ['Body']),
@@ -568,19 +612,28 @@ preprocessing_pipeline = Pipeline([
         ('description_bow', CountVectorizer(max_features=50, lowercase=True, stop_words='english'), 'Description'),
         ('edition_bow', CountVectorizer(max_features=30, lowercase=True, stop_words='english'), 'Edition'),
     ], remainder='passthrough')),
+    ('car_age_transform', ColumnTransformer([
+        ('car_age_yj', PowerTransformer(method='yeo-johnson'), ['Car_Age'])
+    ], remainder='passthrough')),
     ('scaler', None),
 ])
+
+# %%
+#since we need to transform the price now
+#  y_pred = price_transformer.inverse_transform(y_pred_transformed.reshape(-1, 1)).ravel()
+# is needed  after pred.
 
 # %% [markdown]
 # # Model Selection
 
 # %% [markdown]
-# [] Grid search different params
+# [ ] Grid search different params
 #
-#     [] Different imputer for body
+#     [ ] Different imputer for body
 #     
-#     [] Different feature sizes for the CountVectorizer of description and edition
+#     [ ] Different feature sizes for the CountVectorizer of description and edition
 #     
-#     [] Whether to add or not add the car_age transformed feature
+#     [ ] Whether to add or not add the car_age transformed feature
 
 # %%
+
