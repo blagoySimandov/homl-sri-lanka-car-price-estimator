@@ -275,6 +275,20 @@ class ColumnRenamerTransformer(BaseEstimator, TransformerMixin):
         }
         return X.rename(columns=existing_mappings)
 
+class DatetimeToUnixTransformer(BaseEstimator, TransformerMixin):
+    def __init__(self, datetime_columns):
+        self.datetime_columns = datetime_columns
+
+    def fit(self, X, y=None):
+        return self
+
+    def transform(self, X):
+        X = X.copy()
+        for col in self.datetime_columns:
+            if col in X.columns:
+                X[col] = pd.to_datetime(X[col]).astype(int) / 10**9
+        return X
+
 
 # %%
 cleaning_pipeline = Pipeline(
@@ -303,8 +317,12 @@ cleaning_pipeline = Pipeline(
         (
             "rename_columns",
             ColumnRenamerTransformer(
-                rename_mapping={"published_date": "Published_Date"}#i don't like that it doesn't follow the pattern
+                rename_mapping={"published_date": "Published_Date"}
             ),
+        ),
+        (
+            "convert_datetime",
+            DatetimeToUnixTransformer(datetime_columns=["Published_Date"]),
         ),
     ]
 )
@@ -594,27 +612,27 @@ preprocessing_pipeline = Pipeline([
     ('add_car_age', CarAgeTransformer(current_year=2025)),
     ('target_encode', ColumnTransformer([
         ('model_location_encoder', TargetEncoder(categories='auto', target_type='continuous', smooth='auto', cv=5), ['Model', 'Location'])
-    ], remainder='passthrough')),
+    ], remainder='passthrough', verbose_feature_names_out=False).set_output(transform='pandas')),
     ('frequency_encode', FrequencyEncoderTransformer(columns=['Seller_name'])),
     ('impute_body', ColumnTransformer([
         ('body_imputer', SimpleImputer(strategy='constant', fill_value='unknown'), ['Body']),
-    ], remainder='passthrough')),
+    ], remainder='passthrough', verbose_feature_names_out=False).set_output(transform='pandas')),
     ('ordinal_encoding', ColumnTransformer([
         ('condition_encoder', OrdinalEncoder(categories=[['used', 'reconditioned', 'new']], handle_unknown='use_encoded_value', unknown_value=-1), ['Condition']),
-    ], remainder='passthrough')),
+    ], remainder='passthrough', verbose_feature_names_out=False).set_output(transform='pandas')),
+    ('car_age_transform', ColumnTransformer([
+        ('car_age_yj', PowerTransformer(method='yeo-johnson'), ['Car_Age'])
+    ], remainder='passthrough', verbose_feature_names_out=False).set_output(transform='pandas')),
     ('one_hot_encoding', ColumnTransformer([
         ('brand_encoder', OneHotEncoder(drop='first', sparse_output=False, handle_unknown='infrequent_if_exist', min_frequency=0.005), ['Brand']),
         ('fuel_encoder', OneHotEncoder(drop='first', sparse_output=False, handle_unknown='ignore'), ['Fuel']),
         ('transmission_encoder', OneHotEncoder(drop='first', sparse_output=False, handle_unknown='ignore'), ['Transmission']),
         ('body_encoder', OneHotEncoder(drop='first', sparse_output=False, handle_unknown='ignore'), ['Body']),
-    ], remainder='passthrough')),
+    ], remainder='passthrough', verbose_feature_names_out=False).set_output(transform='pandas')),
     ('text_features', ColumnTransformer([
         ('description_bow', CountVectorizer(max_features=50, lowercase=True, stop_words='english'), 'Description'),
         ('edition_bow', CountVectorizer(max_features=30, lowercase=True, stop_words='english'), 'Edition'),
-    ], remainder='passthrough')),
-    ('car_age_transform', ColumnTransformer([
-        ('car_age_yj', PowerTransformer(method='yeo-johnson'), ['Car_Age'])
-    ], remainder='passthrough')),
+    ], remainder='passthrough', verbose_feature_names_out=False)),
     ('scaler', None),
 ])
 
@@ -626,14 +644,52 @@ preprocessing_pipeline = Pipeline([
 # %% [markdown]
 # # Model Selection
 
-# %% [markdown]
-# [ ] Grid search different params
-#
-#     [ ] Different imputer for body
-#     
-#     [ ] Different feature sizes for the CountVectorizer of description and edition
-#     
-#     [ ] Whether to add or not add the car_age transformed feature
+# %%
+from sklearn.linear_model import LinearRegression
+from sklearn.model_selection import GridSearchCV
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+
+# %%
+price_transformer = PowerTransformer(method='yeo-johnson')
+y_train_transformed = price_transformer.fit_transform(y_train.values.reshape(-1, 1)).ravel()
+y_val_transformed = price_transformer.transform(y_val.values.reshape(-1, 1)).ravel()
+
+# %%
+full_pipeline = Pipeline([
+    ('preprocessing', preprocessing_pipeline),
+    ('model', LinearRegression())
+])
+
+# %%
+param_grid = {
+    'preprocessing__scaler': [StandardScaler(), RobustScaler(), None],
+    'preprocessing__car_age_transform__car_age_yj': [PowerTransformer(method='yeo-johnson'), 'passthrough']
+}
+
+grid_search = GridSearchCV(
+    full_pipeline,
+    param_grid,
+    cv=10,
+    scoring='neg_mean_absolute_error',
+    n_jobs=-1,
+    verbose=2
+)
+
+# %%
+grid_search.fit(X_train, y_train_transformed)
+
+# %%
+print(f"Best parameters: {grid_search.best_params_}")
+print(f"Best MAE (CV): {-grid_search.best_score_:,.2f}")
+
+# %%
+y_val_pred_transformed = grid_search.predict(X_val)
+y_val_pred = price_transformer.inverse_transform(y_val_pred_transformed.reshape(-1, 1)).ravel()
+
+val_mae = mean_absolute_error(y_val, y_val_pred)
+
+print(f"\nValidation Metrics:")
+print(f"MAE: {val_mae:,.2f}")
 
 # %%
 
