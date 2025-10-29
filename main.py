@@ -303,7 +303,7 @@ cleaning_pipeline = Pipeline(
         (
             "rename_columns",
             ColumnRenamerTransformer(
-                rename_mapping={"published_date": "Published_Date"}
+                rename_mapping={"published_date": "Published_Date"}#i don't like that it doesn't follow the pattern
             ),
         ),
     ]
@@ -328,15 +328,20 @@ X = df_cleaned.drop('Price', axis=1)
 y = df_cleaned['Price']
 
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+X_train, X_val, y_train, y_val = train_test_split(X_train, y_train, test_size=0.25, random_state=42)
 
 df_train = X_train.copy()
 df_train['Price'] = y_train
 
+df_val = X_val.copy()
+df_val['Price'] = y_val
+
 df_test = X_test.copy()
 df_test['Price'] = y_test
 
-print(f"Training set size: {len(df_train)}")
-print(f"Test set size: {len(df_test)}")
+print(f"training set size: {len(df_train)}")
+print(f"validation set size: {len(df_val)}")
+print(f"test set size: {len(df_test)}")
 
 # %% [markdown]
 # # EDA - Exploritary Data Analysis
@@ -548,7 +553,7 @@ class YeoJohnsonPriceTransformer(BaseEstimator, TransformerMixin):
 preprocessing_pipeline = Pipeline([
     ('add_car_age', CarAgeTransformer(current_year=2025)),
     ('impute_body', ColumnTransformer([
-        ('body_imputer', SimpleImputer(strategy='constant', fill_value='unknown'), ['Body']),
+        ('body_imputer', SimpleImputer(strategy='constant', fill_value='unknown'), ['Body']),#might try a better one later...
     ], remainder='passthrough')),
     ('ordinal_encoding', ColumnTransformer([
         ('condition_encoder', OrdinalEncoder(categories=[['used', 'reconditioned', 'new']], handle_unknown='use_encoded_value', unknown_value=-1), ['Condition']),
@@ -563,7 +568,19 @@ preprocessing_pipeline = Pipeline([
         ('description_bow', CountVectorizer(max_features=50, lowercase=True, stop_words='english'), 'Description'),
         ('edition_bow', CountVectorizer(max_features=30, lowercase=True, stop_words='english'), 'Edition'),
     ], remainder='passthrough')),
-    ('scaler', StandardScaler()),
+    ('scaler', None),
 ])
+
+# %% [markdown]
+# # Model Selection
+
+# %% [markdown]
+# [] Grid search different params
+#
+#     [] Different imputer for body
+#     
+#     [] Different feature sizes for the CountVectorizer of description and edition
+#     
+#     [] Whether to add or not add the car_age transformed feature
 
 # %%
