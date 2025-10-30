@@ -27,9 +27,9 @@ df.drop_duplicates().head()
 #
 
 # %%
-df[
-    df.duplicated(subset=["Description"], keep=False) & ~ df.duplicated()
-].sort_values(by=["Description"])
+df[df.duplicated(subset=["Description"], keep=False) & ~df.duplicated()].sort_values(
+    by=["Description"]
+)
 
 
 # %%
@@ -158,7 +158,9 @@ df.describe()
 df["Brand"].value_counts()
 
 # %%
-len(df[df.apply(lambda row: str(row["Price"]) in str(row["Description"]), axis=1)]) #check if the price is in a lot of descriptions
+len(
+    df[df.apply(lambda row: str(row["Price"]) in str(row["Description"]), axis=1)]
+)  # check if the price is in a lot of descriptions
 
 # %% [markdown]
 # ## Data cleaning
@@ -235,7 +237,6 @@ class TextCleanerTransformer(BaseEstimator, TransformerMixin):
         return X
 
 
-
 class DuplicateRemoverTransformer(BaseEstimator, TransformerMixin):
     def fit(self, X, y=None):
         return self
@@ -275,6 +276,7 @@ class ColumnRenamerTransformer(BaseEstimator, TransformerMixin):
         }
         return X.rename(columns=existing_mappings)
 
+
 class DatetimeToUnixTransformer(BaseEstimator, TransformerMixin):
     def __init__(self, datetime_columns):
         self.datetime_columns = datetime_columns
@@ -295,7 +297,9 @@ cleaning_pipeline = Pipeline(
     [
         (
             "drop_columns",
-            ColumnNukerTransformer(columns_to_drop=["Post_URL", "Title", "Sub_title","Seller_type"]),
+            ColumnNukerTransformer(
+                columns_to_drop=["Post_URL", "Title", "Sub_title", "Seller_type"]
+            ),
         ),
         ("remove_duplicates", DuplicateRemoverTransformer()),
         (
@@ -317,7 +321,9 @@ cleaning_pipeline = Pipeline(
         (
             "rename_columns",
             ColumnRenamerTransformer(
-                rename_mapping={"published_date": "Published_Date"}
+                rename_mapping={
+                    "published_date": "Published_Date"
+                }  # i just don't like the fact it is not following the pattern
             ),
         ),
         (
@@ -342,20 +348,24 @@ df_cleaned.info()
 # %%
 from sklearn.model_selection import train_test_split
 
-X = df_cleaned.drop('Price', axis=1)
-y = df_cleaned['Price']
+X = df_cleaned.drop("Price", axis=1)
+y = df_cleaned["Price"]
 
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-X_train, X_val, y_train, y_val = train_test_split(X_train, y_train, test_size=0.25, random_state=42)
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42
+)
+X_train, X_val, y_train, y_val = train_test_split(
+    X_train, y_train, test_size=0.25, random_state=42
+)
 
 df_train = X_train.copy()
-df_train['Price'] = y_train
+df_train["Price"] = y_train
 
 df_val = X_val.copy()
-df_val['Price'] = y_val
+df_val["Price"] = y_val
 
 df_test = X_test.copy()
-df_test['Price'] = y_test
+df_test["Price"] = y_test
 
 print(f"training set size: {len(df_train)}")
 print(f"validation set size: {len(df_val)}")
@@ -382,16 +392,40 @@ import numpy as np
 # %%
 df_train.describe()
 
-    # %%
-    plt.figure(figsize=(12, 6))
-    plt.scatter(df_train.index, df_train['Price'], alpha=0.6, s=20)
-    plt.xlabel('Index')
-    plt.ylabel('Price')
-    plt.grid(True, alpha=0.3)
-    plt.show()
+# %%
+from scipy.stats import skew
+
+# https://www.geeksforgeeks.org/python/scipy-stats-skew-python/
+# Highly skeweed values (over 1) need to be transformed.
+skew(df_cleaned["Mileage"]), skew(df_cleaned["Price"])
+
+# %%
+plt.figure(figsize=(12, 6))
+plt.scatter(df_train.index, df_train["Price"], alpha=0.6, s=20)
+plt.xlabel("Index")
+plt.ylabel("Price")
+plt.grid(True, alpha=0.3)
+plt.show()
+
+# %%
+cols = ["Mileage", "Capacity", "Price"]
+
+plt.figure(figsize=(10, 8))
+
+for i, col in enumerate(cols, 1):
+    plt.subplot(3, 1, i)
+    plt.scatter(df_cleaned.index, df_cleaned[col], alpha=0.6)
+    plt.title(f"{col} Outliers")
+    plt.xlabel("Index")
+    plt.ylabel(col)
+    plt.grid(True)
+
+plt.tight_layout()
+plt.show()
+
 
 # %% [markdown]
-# There are a few outliers I need to clip. Seems like the point of clipping woiuld be around 1.0*1e8 or somewhere between 0.75 and 1
+# There are a few outliers I need to clip. Seems like the point of clipping woiuld be around 1.0*1e8 or somewhere between 0.75 and 1 for price, 6000 for capacity and
 
 # %%
 top_brands = df_train["Brand"].value_counts().head(10).index
@@ -467,7 +501,7 @@ print(correlation)
 # Better. Not the best
 
 # %%
-#https://www.geeksforgeeks.org/machine-learning/powertransformer-in-scikit-learn/
+# https://www.geeksforgeeks.org/machine-learning/powertransformer-in-scikit-learn/
 df_train["Price_transformed"], lambda_price = yeojohnson(df_train["Price"])
 
 
@@ -484,20 +518,6 @@ print(correlation)
 # Hmm this seems pretty good.
 
 # %%
-fuel_types = df_train["Fuel"].dropna().unique()
-fuel_data = [
-    df_train[df_train["Fuel"] == fuel]["Price"].dropna() for fuel in fuel_types
-]
-
-fig, ax = plt.subplots(figsize=(10, 6))
-ax.boxplot(fuel_data, tick_labels=fuel_types)
-ax.set_ylabel("Price (Rs)")
-ax.set_title("Price Distribution by Fuel Type")
-plt.xticks(rotation=45)
-plt.tight_layout()
-plt.show()
-
-# %%
 correlation_features = [
     "Price",
     "Year",
@@ -505,7 +525,31 @@ correlation_features = [
     "Capacity",
 ]
 corr = df_train[correlation_features].corr()
-corr.style.background_gradient(cmap='coolwarm')
+corr.style.background_gradient(cmap="coolwarm")
+
+# %% [markdown]
+# ## I will check the distribution of all the numeric columns to see which would really need transformation
+#
+
+# %%
+correlation_features = ["Price", "Year", "Mileage", "Capacity"]
+
+plt.figure(figsize=(10, 8))
+
+for i, col in enumerate(correlation_features, 1):
+    plt.subplot(2, 2, i)
+    plt.hist(df_train[col], bins=30, color="skyblue", edgecolor="black", alpha=0.7)
+    plt.title(f"{col} Distribution")
+    plt.xlabel(col)
+    plt.ylabel("Frequency")
+    plt.grid(True)
+
+plt.tight_layout()
+plt.show()
+
+
+# %% [markdown]
+# Okay this is pretty skewed.... A power transformer for all fo them might fix the issue.
 
 # %% [markdown]
 # # Preprocessing
@@ -514,14 +558,16 @@ corr.style.background_gradient(cmap='coolwarm')
 # ## Rare Category Analysis
 
 # %%
-high_cardinality_cols = ['Brand', 'Model', 'Location', 'Seller_name']
+high_cardinality_cols = ["Brand", "Model", "Location", "Seller_name"]
 
 for col in high_cardinality_cols:
     print(f"\n{col} - Total unique values: {df_train[col].nunique()}")
     value_counts = df_train[col].value_counts()
     rare_threshold = len(df_train) * 0.002
     rare_categories = value_counts[value_counts < rare_threshold]
-    print(f"Rare categories (< 0.2% of data or < {rare_threshold:.0f} occurrences): {len(rare_categories)}")
+    print(
+        f"Rare categories (< 0.2% of data or < {rare_threshold:.0f} occurrences): {len(rare_categories)}"
+    )
     print(f"Top 10 values:\n{value_counts.head(10)}")
 
 # %% [markdown]
@@ -530,7 +576,7 @@ for col in high_cardinality_cols:
 #
 # For model this won't work as there are too many. I think target encoding would be fine for this as it will give us the mean for the specific model.
 #
-# But for Seller_name this is a bit weird... I think a frequency encoding could work since this will allow us to deferentiate how "Big" a certain seller is. 
+# But for Seller_name this is a bit weird... I think a frequency encoding could work since this will allow us to deferentiate how "Big" a certain seller is.
 #
 # Which in my opinion is the most valuable information.
 #
@@ -564,14 +610,24 @@ df_cleaned["Body"].value_counts()
 # [] Bag of words the Edition: Edition (could try and use a small vocab for this one, i think it would be worth it) or shove it into grid search ?
 
 # %%
-from sklearn.preprocessing import StandardScaler, RobustScaler, MinMaxScaler, PowerTransformer, OrdinalEncoder, OneHotEncoder, TargetEncoder
+from sklearn.preprocessing import (
+    StandardScaler,
+    RobustScaler,
+    MinMaxScaler,
+    PowerTransformer,
+    OrdinalEncoder,
+    OneHotEncoder,
+    TargetEncoder,
+    PolynomialFeatures,
+)
 from sklearn.impute import SimpleImputer
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.compose import ColumnTransformer
 from datetime import datetime
 
+
 # %%
-#adds carAge
+# adds carAge
 class CarAgeTransformer(BaseEstimator, TransformerMixin):
     def __init__(self, current_year=2025):
         self.current_year = current_year
@@ -581,12 +637,12 @@ class CarAgeTransformer(BaseEstimator, TransformerMixin):
 
     def transform(self, X):
         X = X.copy()
-        X['Car_Age'] = self.current_year - X['Year']
-        return X.drop(columns=['Year'])
+        X["Car_Age"] = self.current_year - X["Year"]
+        return X.drop(columns=["Year"])
 
 
 # %%
-#not available in scikit learn so we need to create this one ourselves... :D
+# not available in scikit learn so we need to create this one ourselves... :D
 class FrequencyEncoderTransformer(BaseEstimator, TransformerMixin):
     def __init__(self, columns):
         self.columns = columns
@@ -607,37 +663,159 @@ class FrequencyEncoderTransformer(BaseEstimator, TransformerMixin):
                 X[col] = X[col].map(self.frequency_mappings_[col]).fillna(0)
         return X
 
-# %%
-preprocessing_pipeline = Pipeline([
-    ('add_car_age', CarAgeTransformer(current_year=2025)),
-    ('target_encode', ColumnTransformer([
-        ('model_location_encoder', TargetEncoder(categories='auto', target_type='continuous', smooth='auto', cv=5), ['Model', 'Location'])
-    ], remainder='passthrough', verbose_feature_names_out=False).set_output(transform='pandas')),
-    ('frequency_encode', FrequencyEncoderTransformer(columns=['Seller_name'])),
-    ('impute_body', ColumnTransformer([
-        ('body_imputer', SimpleImputer(strategy='constant', fill_value='unknown'), ['Body']),
-    ], remainder='passthrough', verbose_feature_names_out=False).set_output(transform='pandas')),
-    ('ordinal_encoding', ColumnTransformer([
-        ('condition_encoder', OrdinalEncoder(categories=[['used', 'reconditioned', 'new']], handle_unknown='use_encoded_value', unknown_value=-1), ['Condition']),
-    ], remainder='passthrough', verbose_feature_names_out=False).set_output(transform='pandas')),
-    ('car_age_transform', ColumnTransformer([
-        ('car_age_yj', PowerTransformer(method='yeo-johnson'), ['Car_Age'])
-    ], remainder='passthrough', verbose_feature_names_out=False).set_output(transform='pandas')),
-    ('one_hot_encoding', ColumnTransformer([
-        ('brand_encoder', OneHotEncoder(drop='first', sparse_output=False, handle_unknown='infrequent_if_exist', min_frequency=0.005), ['Brand']),
-        ('fuel_encoder', OneHotEncoder(drop='first', sparse_output=False, handle_unknown='ignore'), ['Fuel']),
-        ('transmission_encoder', OneHotEncoder(drop='first', sparse_output=False, handle_unknown='ignore'), ['Transmission']),
-        ('body_encoder', OneHotEncoder(drop='first', sparse_output=False, handle_unknown='ignore'), ['Body']),
-    ], remainder='passthrough', verbose_feature_names_out=False).set_output(transform='pandas')),
-    ('text_features', ColumnTransformer([
-        ('description_bow', CountVectorizer(max_features=50, lowercase=True, stop_words='english'), 'Description'),
-        ('edition_bow', CountVectorizer(max_features=30, lowercase=True, stop_words='english'), 'Edition'),
-    ], remainder='passthrough', verbose_feature_names_out=False)),
-    ('scaler', None),
-])
 
 # %%
-#since we need to transform the price now
+preprocessing_pipeline = Pipeline(
+    [
+        ("add_car_age", CarAgeTransformer(current_year=2025)),
+        (
+            "target_encode",
+            ColumnTransformer(
+                [
+                    (
+                        "model_location_encoder",
+                        TargetEncoder(
+                            categories="auto", target_type="continuous", cv=5
+                        ),
+                        ["Model", "Location"],
+                    )
+                ],
+                remainder="passthrough",
+                verbose_feature_names_out=False,
+            ).set_output(transform="pandas"),
+        ),
+        ("frequency_encode", FrequencyEncoderTransformer(columns=["Seller_name"])),
+        (
+            "impute_body",
+            ColumnTransformer(
+                [
+                    (
+                        "body_imputer",
+                        SimpleImputer(strategy="constant", fill_value="unknown"),
+                        ["Body"],
+                    ),
+                ],
+                remainder="passthrough",
+                verbose_feature_names_out=False,
+            ).set_output(transform="pandas"),
+        ),
+        (
+            "ordinal_encoding",
+            ColumnTransformer(
+                [
+                    (
+                        "condition_encoder",
+                        OrdinalEncoder(
+                            categories=[["used", "reconditioned", "new"]],
+                            handle_unknown="use_encoded_value",
+                            unknown_value=-1,
+                        ),
+                        ["Condition"],
+                    ),
+                ],
+                remainder="passthrough",
+                verbose_feature_names_out=False,
+            ).set_output(transform="pandas"),
+        ),
+        (
+            "power_transform",
+            ColumnTransformer(
+                [
+                    ("car_age_yj", PowerTransformer(method="yeo-johnson"), ["Car_Age"]),
+                    ("mileage_yj", PowerTransformer(method="yeo-johnson"), ["Mileage"]),
+                    (
+                        "capacity_yj",
+                        PowerTransformer(method="yeo-johnson"),
+                        ["Capacity"],
+                    ),
+                ],
+                remainder="passthrough",
+                verbose_feature_names_out=False,
+            ).set_output(transform="pandas"),
+        ),
+        (
+            "poly_features",
+            ColumnTransformer(
+                [
+                    (
+                        "poly",
+                        PolynomialFeatures(),
+                        ["Mileage", "Capacity"],
+                    )
+                ],
+                remainder="passthrough",
+                verbose_feature_names_out=False,
+            ).set_output(transform="pandas"),
+        ),
+        (
+            "one_hot_encoding",
+            ColumnTransformer(
+                [
+                    (
+                        "brand_encoder",
+                        OneHotEncoder(
+                            drop="first",
+                            sparse_output=False,
+                            handle_unknown="infrequent_if_exist",
+                            min_frequency=0.005,
+                        ),
+                        ["Brand"],
+                    ),
+                    (
+                        "fuel_encoder",
+                        OneHotEncoder(
+                            drop="first", sparse_output=False, handle_unknown="ignore"
+                        ),
+                        ["Fuel"],
+                    ),
+                    (
+                        "transmission_encoder",
+                        OneHotEncoder(
+                            drop="first", sparse_output=False, handle_unknown="ignore"
+                        ),
+                        ["Transmission"],
+                    ),
+                    (
+                        "body_encoder",
+                        OneHotEncoder(
+                            drop="first", sparse_output=False, handle_unknown="ignore"
+                        ),
+                        ["Body"],
+                    ),
+                ],
+                remainder="passthrough",
+                verbose_feature_names_out=False,
+            ).set_output(transform="pandas"),
+        ),
+        (
+            "text_features",
+            ColumnTransformer(
+                [
+                    (
+                        "description_bow",
+                        CountVectorizer(
+                            max_features=50, lowercase=True, stop_words="english"
+                        ),
+                        "Description",
+                    ),
+                    (
+                        "edition_bow",
+                        CountVectorizer(
+                            max_features=30, lowercase=True, stop_words="english"
+                        ),
+                        "Edition",
+                    ),
+                ],
+                remainder="passthrough",
+                verbose_feature_names_out=False,
+            ),
+        ),
+        ("scaler", None),
+    ]
+)
+
+# %%
+# since we need to transform the price now
 #  y_pred = price_transformer.inverse_transform(y_pred_transformed.reshape(-1, 1)).ravel()
 # is needed  after pred.
 
@@ -645,51 +823,128 @@ preprocessing_pipeline = Pipeline([
 # # Model Selection
 
 # %%
-from sklearn.linear_model import LinearRegression
-from sklearn.model_selection import GridSearchCV
+from sklearn.linear_model import LinearRegression, Ridge
+from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
 # %%
-price_transformer = PowerTransformer(method='yeo-johnson')
-y_train_transformed = price_transformer.fit_transform(y_train.values.reshape(-1, 1)).ravel()
+import warnings
+
+warnings.filterwarnings("ignore")
+
+# %%
+full_pipeline = Pipeline(
+    [
+        ("preprocessing", preprocessing_pipeline),
+        ("model", LinearRegression()),
+    ]
+)
+
+param_grid = {
+    "preprocessing__scaler": [StandardScaler(), RobustScaler(), None],
+    "preprocessing__text_features__description_bow__max_features": [100, 200],
+    "preprocessing__text_features__edition_bow__max_features": [50, 60],
+    "preprocessing__poly_features__poly__degree": [1, 2, 3],
+    "preprocessing__poly_features__poly__interaction_only": [False, True],
+    "model__alpha": [0.1, 0.5, 1],
+}
+
+# %%
+price_transformer = PowerTransformer(method="yeo-johnson")
+y_train_transformed = price_transformer.fit_transform(
+    y_train.values.reshape(-1, 1)
+).ravel()
 y_val_transformed = price_transformer.transform(y_val.values.reshape(-1, 1)).ravel()
 
 # %%
-full_pipeline = Pipeline([
-    ('preprocessing', preprocessing_pipeline),
-    ('model', LinearRegression())
-])
-
-# %%
-param_grid = {
-    'preprocessing__scaler': [StandardScaler(), RobustScaler(), None],
-    'preprocessing__car_age_transform__car_age_yj': [PowerTransformer(method='yeo-johnson'), 'passthrough']
-}
-
-grid_search = GridSearchCV(
+grid_search = RandomizedSearchCV(
     full_pipeline,
     param_grid,
-    cv=10,
-    scoring='neg_mean_absolute_error',
+    cv=2,
+    scoring="neg_mean_absolute_error",
     n_jobs=-1,
-    verbose=2
+    verbose=2,
 )
-
-# %%
 grid_search.fit(X_train, y_train_transformed)
 
 # %%
-print(f"Best parameters: {grid_search.best_params_}")
 print(f"Best MAE (CV): {-grid_search.best_score_:,.2f}")
+print(f"Best params: {grid_search.best_params_}")
+print(grid_search.best_estimator_.n_features_in_)
+
+
+# %%
+def check_fit(model, X_train, y_train, X_val, y_val, price_transformer):
+    y_train_pred_transformed = model.predict(X_train)
+    y_train_pred = price_transformer.inverse_transform(
+        y_train_pred_transformed.reshape(-1, 1)
+    ).ravel()
+
+    y_val_pred_transformed = model.predict(X_val)
+    y_val_pred = price_transformer.inverse_transform(
+        y_val_pred_transformed.reshape(-1, 1)
+    ).ravel()
+
+    train_mae = mean_absolute_error(y_train, y_train_pred)
+    val_mae = mean_absolute_error(y_val, y_val_pred)
+
+    return train_mae, val_mae
+
+
+# %%
+print(check_fit(grid_search, X_train, y_train, X_val, y_val, price_transformer))
+
+# %% [markdown]
+# # Debugging
+
+# %%
+y_train.describe(), y_val.describe()
 
 # %%
 y_val_pred_transformed = grid_search.predict(X_val)
-y_val_pred = price_transformer.inverse_transform(y_val_pred_transformed.reshape(-1, 1)).ravel()
+y_val_pred = price_transformer.inverse_transform(
+    y_val_pred_transformed.reshape(-1, 1)
+).ravel()
 
-val_mae = mean_absolute_error(y_val, y_val_pred)
+pd.DataFrame(
+    {
+        "actual": y_val.values,
+        "predicted": y_val_pred,
+        "error": np.abs(y_val.values - y_val_pred),
+    }
+).describe()
 
-print(f"\nValidation Metrics:")
-print(f"MAE: {val_mae:,.2f}")
+# %%
+plt.figure(figsize=(10, 6))
+plt.scatter(y_val, y_val_pred, alpha=0.3)
+plt.plot([y_val.min(), y_val.max()], [y_val.min(), y_val.max()], "r--", lw=2)
+plt.xlabel("Actual Price")
+plt.ylabel("Predicted Price")
+plt.title("Actual vs Predicted")
+plt.show()
 
 # %%
 
+# %%
+
+# %%
+
+# %%
+
+# %%
+
+# %%
+
+# %%
+
+# %%
+
+# %%
+
+# %%
+
+# %%
+
+# %%
+
+# %%
