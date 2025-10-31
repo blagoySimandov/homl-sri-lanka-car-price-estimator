@@ -559,6 +559,43 @@ plt.show()
 # %% [markdown]
 # Okay this is pretty skewed.... A power transformer for all fo them might fix the issue.
 
+# %%
+df_train["Mileage_transformed"] = yeojohnson(df_train["Mileage"])[0]
+df_train["Capacity_transformed"] = yeojohnson(df_train["Capacity"])[0]
+
+# %%
+corr = df_train[["Price_transformed", "Car_Age_transformed", "Mileage_transformed", "Capacity_transformed"]].corr()
+corr.style.background_gradient(cmap="coolwarm")
+
+# %% [markdown]
+# Correlations improve moderately after power transformations
+
+# %%
+import matplotlib.pyplot as plt
+
+fig, axes = plt.subplots(1, 3, figsize=(15, 4))
+
+axes[0].hist(df_train["Car_Age_transformed"], bins=30, color="steelblue", alpha=0.7)
+axes[0].set_xlabel("Car Age (transformed)")
+axes[0].set_ylabel("Frequency")
+
+axes[1].hist(df_train["Mileage_transformed"], bins=30, color="seagreen", alpha=0.7)
+axes[1].set_xlabel("Mileage (transformed)")
+axes[1].set_ylabel("Frequency")
+
+axes[2].hist(df_train["Capacity_transformed"], bins=30, color="indianred", alpha=0.7)
+axes[2].set_xlabel("Capacity (transformed)")
+axes[2].set_ylabel("Frequency")
+
+plt.tight_layout()
+plt.show()
+
+
+# %% [markdown]
+# ----------
+# The distribution seems much more normal.
+# Since parametric models like ridge and linear regression like this while knn and decision trees don't mind it. I will just leave it as is in the preprocessing step. Although i did do some experiments below in the grid search where I checked how much better transformed features perform compared to the untransformed once and the findings were staggering! The improvement was around 30-40% wiuth the transformed  alues. From error around 2mil R.s to erro  
+
 # %% [markdown]
 # # Preprocessing
 
