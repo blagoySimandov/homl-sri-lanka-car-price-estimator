@@ -15,7 +15,7 @@ df[df.duplicated()]
 # they posted their car twice. Nuke them :D
 
 # %%
-#df.drop_duplicates().head()
+# df.drop_duplicates().head()
 
 
 # %% [markdown]
@@ -24,9 +24,7 @@ df[df.duplicated()]
 #
 
 # %%
-df[df.duplicated(subset=["Description"], keep=False) & ~df.duplicated()].sort_values(
-    by=["Description"]
-).head()
+df[df.duplicated(subset=["Description"], keep=False) & ~df.duplicated()].sort_values(by=["Description"]).head()
 
 
 # %%
@@ -57,11 +55,7 @@ df["Edition"].value_counts()
 
 # %%
 # how many sellers are seen more than 10 times
-df[
-    df["Seller_name"].isin(
-        df["Seller_name"].value_counts()[df["Seller_name"].value_counts() > 3].index
-    )
-]
+df[df["Seller_name"].isin(df["Seller_name"].value_counts()[df["Seller_name"].value_counts() > 3].index)]
 
 
 # %% [markdown]
@@ -85,11 +79,7 @@ edition_lowercase.value_counts()
 #
 
 # %%
-df[
-    df["Edition"].isin(
-        df["Edition"].value_counts()[df["Edition"].value_counts() > 1].index
-    )
-]
+df[df["Edition"].isin(df["Edition"].value_counts()[df["Edition"].value_counts() > 1].index)]
 
 # %% [markdown]
 # Okay this is getting nowhere..
@@ -162,9 +152,7 @@ df.info()
 df["Brand"].value_counts()
 
 # %%
-len(
-    df[df.apply(lambda row: str(row["Price"]) in str(row["Description"]), axis=1)]
-)  # check if the price is in a lot of descriptions
+len(df[df.apply(lambda row: str(row["Price"]) in str(row["Description"]), axis=1)])  # check if the price is in a lot of descriptions
 
 # %% [markdown]
 # ## Data cleaning
@@ -213,9 +201,7 @@ class NumericCleanerTransformer(BaseEstimator, TransformerMixin):
         X = X.copy()
         for col, pattern in self.columns_config.items():
             if col in X.columns:
-                X[col] = (
-                    X[col].astype(str).str.replace(pattern, "", regex=True).str.strip()
-                )
+                X[col] = X[col].astype(str).str.replace(pattern, "", regex=True).str.strip()
                 X[col] = X[col].str.replace(",", "", regex=False)
                 X[col] = pd.to_numeric(X[col], errors="coerce")
         return X
@@ -276,9 +262,7 @@ class ColumnRenamerTransformer(BaseEstimator, TransformerMixin):
 
     def transform(self, X):
         X = X.copy()
-        existing_mappings = {
-            old: new for old, new in self.rename_mapping.items() if old in X.columns
-        }
+        existing_mappings = {old: new for old, new in self.rename_mapping.items() if old in X.columns}
         return X.rename(columns=existing_mappings)
 
 
@@ -298,20 +282,32 @@ class DatetimeToUnixTransformer(BaseEstimator, TransformerMixin):
 
 
 # %%
-cleaning_pipeline = Pipeline([
-    ("drop_columns", ColumnNukerTransformer(columns_to_drop=["Post_URL", "Title", "Sub_title", "Seller_type"])),
-    ("remove_duplicates", DuplicateRemoverTransformer()),
-    ("clean_numeric", NumericCleanerTransformer(columns_config={
-        "Capacity": r"\s*cc\s*$",
-        "Mileage": r"\s*km\s*$",
-        "Price": r"^Rs\s*",
-    })),
-    ("clean_text", TextCleanerTransformer(text_columns=["Edition", "Description", "Seller_name"])),
-    ("rename_columns", ColumnRenamerTransformer(rename_mapping={
-        "published_date": "Published_Date",  # keep consistent naming pattern
-    })),
-    ("convert_datetime", DatetimeToUnixTransformer(datetime_columns=["Published_Date"])),
-])
+cleaning_pipeline = Pipeline(
+    [
+        ("drop_columns", ColumnNukerTransformer(columns_to_drop=["Post_URL", "Title", "Sub_title", "Seller_type"])),
+        ("remove_duplicates", DuplicateRemoverTransformer()),
+        (
+            "clean_numeric",
+            NumericCleanerTransformer(
+                columns_config={
+                    "Capacity": r"\s*cc\s*$",
+                    "Mileage": r"\s*km\s*$",
+                    "Price": r"^Rs\s*",
+                }
+            ),
+        ),
+        ("clean_text", TextCleanerTransformer(text_columns=["Edition", "Description", "Seller_name"])),
+        (
+            "rename_columns",
+            ColumnRenamerTransformer(
+                rename_mapping={
+                    "published_date": "Published_Date",  # keep consistent naming pattern
+                }
+            ),
+        ),
+        ("convert_datetime", DatetimeToUnixTransformer(datetime_columns=["Published_Date"])),
+    ]
+)
 
 
 # %%
@@ -324,7 +320,7 @@ df_cleaned.head()
 df_cleaned.info()
 
 # %%
-df_cleaned[df_cleaned["Edition"].isna()].head() 
+df_cleaned[df_cleaned["Edition"].isna()].head()
 
 
 # %% [markdown]
@@ -334,9 +330,9 @@ df_cleaned[df_cleaned["Edition"].isna()].head()
 #
 # MCAR, MAR or MNAR: (taken from this https://medium.com/%40ajayverma23/data-imputation-a-comprehensive-guide-to-handling-missing-values-b5c7d11c3488)
 #
-# MCAR = Missing Completely At Random (the missingness has nothing to do with values or other features) 
+# MCAR = Missing Completely At Random (the missingness has nothing to do with values or other features)
 #
-# MAR = Missing At Random (missingness depends on other observed variables) 
+# MAR = Missing At Random (missingness depends on other observed variables)
 #
 # MNAR = Missing Not At Random
 
@@ -348,14 +344,12 @@ from sklearn.model_selection import train_test_split
 
 X = df_cleaned.drop("Price", axis=1)
 y = df_cleaned["Price"]
-rngs = 42 # using this so we have reproduceability
+rngs = 42  # using this so we have reproduceability
 
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=rngs
-)
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=rngs)
 X_train, X_val, y_train, y_val = train_test_split(
     X_train, y_train, test_size=0.25, random_state=rngs
-)# 25 percent so that validation and test set are the same size
+)  # 25 percent so that validation and test set are the same size
 
 df_train = X_train.copy()
 df_train["Price"] = y_train
@@ -381,14 +375,20 @@ print(f"test set size: {len(df_test)}")
 # 2. Check for relationships between columns
 #     Price to Body,Model,Year, Capacity, Mileage, Fuel Type
 # 3. Try some new features like: Car age and Mileage per year and see how predictive they are of the price. (check for non linear relationships as well)
-#    
+#
 
 # %%
 import matplotlib.pyplot as plt
 import numpy as np
 
+# %% [markdown]
+# Using a copy to avoid polluting the training dataframe during EDA experiments
+
 # %%
-df_train.describe()
+df_train_copy = df_train.copy()
+
+# %%
+df_train_copy.describe()
 
 # %%
 from scipy.stats import skew
@@ -399,7 +399,7 @@ skew(df_cleaned["Mileage"]), skew(df_cleaned["Price"])
 
 # %% [markdown]
 # --------------------------------------
-# Let's take a look at some outliers. 
+# Let's take a look at some outliers.
 
 # %%
 cols = ["Mileage", "Capacity", "Price"]
@@ -426,12 +426,10 @@ plt.show()
 # ------------------
 
 # %%
-top_brands = df_train["Brand"].value_counts().head(10).index
-df_brand_price = df_train[df_train["Brand"].isin(top_brands)]
+top_brands = df_train_copy["Brand"].value_counts().head(10).index
+df_brand_price = df_train_copy[df_train_copy["Brand"].isin(top_brands)]
 
-brand_data = [
-    df_brand_price[df_brand_price["Brand"] == brand]["Price"] for brand in top_brands
-]
+brand_data = [df_brand_price[df_brand_price["Brand"] == brand]["Price"] for brand in top_brands]
 
 fig, ax = plt.subplots(figsize=(12, 6))
 ax.boxplot(brand_data, tick_labels=top_brands, vert=False)
@@ -446,12 +444,10 @@ plt.show()
 #
 
 # %%
-top_models = df_train["Model"].value_counts().head(15).index
-df_model_price = df_train[df_train["Model"].isin(top_models)]
+top_models = df_train_copy["Model"].value_counts().head(15).index
+df_model_price = df_train_copy[df_train_copy["Model"].isin(top_models)]
 
-model_data = [
-    df_model_price[df_model_price["Model"] == model]["Price"] for model in top_models
-]
+model_data = [df_model_price[df_model_price["Model"] == model]["Price"] for model in top_models]
 
 fig, ax = plt.subplots(figsize=(12, 8))
 ax.boxplot(model_data, tick_labels=top_models, vert=False)
@@ -468,10 +464,10 @@ plt.show()
 
 # %%
 current_year = 2025
-df_train["Car_Age"] = current_year - df_train["Year"]
+df_train_copy["Car_Age"] = current_year - df_train_copy["Year"]
 
 plt.figure(figsize=(14, 6))
-plt.scatter(df_train["Car_Age"], df_train["Price"], alpha=0.3)
+plt.scatter(df_train_copy["Car_Age"], df_train_copy["Price"], alpha=0.3)
 plt.xlabel("Car Age (years)")
 plt.ylabel("Price (Rs)")
 plt.title("Price vs Car Age")
@@ -486,12 +482,12 @@ plt.show()
 
 from scipy.stats import yeojohnson
 
-df_train["Car_Age_transformed"] = yeojohnson(df_train["Car_Age"])[0]
+df_train_copy["Car_Age_transformed"] = yeojohnson(df_train_copy["Car_Age"])[0]
 
 # %%
 
-correlation = df_train["Car_Age_transformed"].corr(df_train["Price"])
-plt.scatter(df_train["Car_Age_transformed"], df_train["Price"], alpha=0.3)
+correlation = df_train_copy["Car_Age_transformed"].corr(df_train_copy["Price"])
+plt.scatter(df_train_copy["Car_Age_transformed"], df_train_copy["Price"], alpha=0.3)
 plt.show()
 print(correlation)
 
@@ -506,13 +502,13 @@ print(correlation)
 #
 
 # %%
-df_train["Price_transformed"], lambda_price = yeojohnson(df_train["Price"])
+df_train_copy["Price_transformed"], lambda_price = yeojohnson(df_train_copy["Price"])
 
 
 # %%
 
-correlation = df_train["Car_Age_transformed"].corr(df_train["Price_transformed"])
-plt.scatter(df_train["Car_Age_transformed"], df_train["Price_transformed"], alpha=0.3)
+correlation = df_train_copy["Car_Age_transformed"].corr(df_train_copy["Price_transformed"])
+plt.scatter(df_train_copy["Car_Age_transformed"], df_train_copy["Price_transformed"], alpha=0.3)
 plt.show()
 print(correlation)
 
@@ -526,12 +522,12 @@ correlation_features = [
     "Mileage",
     "Capacity",
 ]
-corr = df_train[correlation_features].corr()
+corr = df_train_copy[correlation_features].corr()
 corr.style.background_gradient(cmap="coolwarm")
 
 # %% [markdown]
 # ----------------
-# All of the numeric columns by themeselves have low correlation with the price. Some feature engineering or 
+# All of the numeric columns by themeselves have low correlation with the price. Some feature engineering or
 # power transformations could help this. Will do some more analysis below and see.
 
 # %% [markdown]
@@ -546,7 +542,7 @@ plt.figure(figsize=(10, 8))
 
 for i, col in enumerate(correlation_features, 1):
     plt.subplot(2, 2, i)
-    plt.hist(df_train[col], bins=30, color="skyblue", edgecolor="black", alpha=0.7)
+    plt.hist(df_train_copy[col], bins=30, color="skyblue", edgecolor="black", alpha=0.7)
     plt.title(f"{col} Distribution")
     plt.xlabel(col)
     plt.ylabel("Frequency")
@@ -560,11 +556,12 @@ plt.show()
 # Okay this is pretty skewed.... A power transformer for all fo them might fix the issue.
 
 # %%
-df_train["Mileage_transformed"] = yeojohnson(df_train["Mileage"])[0]
-df_train["Capacity_transformed"] = yeojohnson(df_train["Capacity"])[0]
+df_train_copy["Mileage_transformed"] = yeojohnson(df_train_copy["Mileage"])[0]
+df_train_copy["Capacity_transformed"] = yeojohnson(df_train_copy["Capacity"])[0]
+df_train_copy["Year_transformed"] = yeojohnson(df_train_copy["Year"])[0]
 
 # %%
-corr = df_train[["Price_transformed", "Car_Age_transformed", "Mileage_transformed", "Capacity_transformed"]].corr()
+corr = df_train_copy[["Price_transformed", "Car_Age_transformed", "Mileage_transformed", "Capacity_transformed", "Year_transformed"]].corr()
 corr.style.background_gradient(cmap="coolwarm")
 
 # %% [markdown]
@@ -573,19 +570,25 @@ corr.style.background_gradient(cmap="coolwarm")
 # %%
 import matplotlib.pyplot as plt
 
-fig, axes = plt.subplots(1, 3, figsize=(15, 4))
+correlation_features = [
+    "Price_transformed",
+    "Car_Age_transformed",
+    "Mileage_transformed",
+    "Capacity_transformed",
+    "Year_transformed",
+]
 
-axes[0].hist(df_train["Car_Age_transformed"], bins=30, color="steelblue", alpha=0.7)
-axes[0].set_xlabel("Car Age (transformed)")
-axes[0].set_ylabel("Frequency")
+plt.figure(figsize=(8, 15))  # taller figure for 5 stacked plots
 
-axes[1].hist(df_train["Mileage_transformed"], bins=30, color="seagreen", alpha=0.7)
-axes[1].set_xlabel("Mileage (transformed)")
-axes[1].set_ylabel("Frequency")
+colors = ["steelblue", "seagreen", "indianred", "darkorange", "mediumpurple"]
 
-axes[2].hist(df_train["Capacity_transformed"], bins=30, color="indianred", alpha=0.7)
-axes[2].set_xlabel("Capacity (transformed)")
-axes[2].set_ylabel("Frequency")
+for i, (col, color) in enumerate(zip(correlation_features, colors), 1):
+    plt.subplot(len(correlation_features), 1, i)
+    plt.hist(df_train_copy[col], bins=30, color=color, edgecolor="black", alpha=0.7)
+    plt.title(f"{col} Distribution", fontsize=12, fontweight="bold")
+    plt.xlabel(col, fontsize=10)
+    plt.ylabel("Frequency", fontsize=10)
+    plt.grid(True, linestyle="--", alpha=0.5)
 
 plt.tight_layout()
 plt.show()
@@ -594,10 +597,63 @@ plt.show()
 # %% [markdown]
 # ----------
 # The distribution seems much more normal.
-# Since parametric models like ridge and linear regression like this while knn and decision trees don't mind it. I will just leave it as is in the preprocessing step. Although i did do some experiments below in the grid search where I checked how much better transformed features perform compared to the untransformed once and the findings were staggering! The improvement was around 30-40% wiuth the transformed  alues. From error around 2mil R.s to erro  
+# Since parametric models like ridge and linear regression like this while knn and decision trees don't mind it. I will just leave it as is in the preprocessing step. Although i did do some experiments below in the grid search where I checked how much better transformed features perform compared to the untransformed once and the findings were staggering! The improvement was around 40-50% with the transformed  alues. From error around 2mil R.s to error around 1.1-1.2 mil R.s
+#
+# The only thing that doesn't really show a super normal distribution is Year but it has such good correlation with price now that i will leave it as is
+#
+# Note: it went from 0.35 to 0.67
 
 # %% [markdown]
-# # Preprocessing
+# ### Is Edition missing because of  MNAR,MCAR or MNAR ?
+
+# %% [markdown]
+# Approach inspired by: https://www.reddit.com/r/AskStatistics/comments/17nigqk/diagnosing_type_of_missing_data_mcar_mar_mnar/
+#
+# "What you're ultimately looking for is patterns in the missingness. In other words, do the records where a given feature is missing have a different distribution than the records where the feature isn't missing? If the answer to that question is a clear 'yes', then that feature isn't missing at random. A clear 'no' means the feature is missing completely random. If it's less clear then the feature then it can likely said to be missing at random, but could also go either way."
+
+# %%
+df_train_copy["Edition_missing"] = df_train_copy["Edition"].isna()
+
+# %%
+fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+
+top_brands = df_train_copy["Brand"].value_counts().head(10).index
+brand_missing = df_train_copy[df_train_copy["Brand"].isin(top_brands)].groupby("Brand")["Edition_missing"].mean().sort_values()
+axes[0, 0].barh(brand_missing.index, brand_missing.values, color="steelblue")
+
+axes[0, 1].bar(
+    df_train_copy.groupby("Condition")["Edition_missing"].mean().index,
+    df_train_copy.groupby("Condition")["Edition_missing"].mean().values,
+    color="seagreen",
+)
+
+axes[1, 0].boxplot(
+    [df_train_copy.loc[~df_train_copy["Edition_missing"], "Price"], df_train_copy.loc[df_train_copy["Edition_missing"], "Price"]],
+    tick_labels=["Has Edition", "Missing"],
+    vert=False,
+)
+
+axes[1, 1].boxplot(
+    [df_train_copy.loc[~df_train_copy["Edition_missing"], "Year"], df_train_copy.loc[df_train_copy["Edition_missing"], "Year"]],
+    tick_labels=["Has Edition", "Missing"],
+    vert=False,
+)
+
+titles = ["Edition Missing by Brand", "Edition Missing by Condition", "Price Distribution", "Year Distribution"]
+for ax, title in zip(axes.flat, titles):
+    ax.set_title(title)
+
+plt.tight_layout()
+plt.show()
+
+
+# %% [markdown]
+# ---------
+# Seems to be MAR or MCAR - Missing at Random / Missing at Completely Random
+# I see a correlation between brand and  condition and their missing rate but it seems not super significant
+# and also I'm not sure how to use that for the imputation...
+# I will just impute it with a missing token "Unknown" or NaN or something similar
+# I might be able to impute it by just getting the most common edition
 
 # %% [markdown]
 # ## Rare Category Analysis
@@ -610,9 +666,7 @@ for col in high_cardinality_cols:
     value_counts = df_train[col].value_counts()
     rare_threshold = len(df_train) * 0.002
     rare_categories = value_counts[value_counts < rare_threshold]
-    print(
-        f"Rare categories (< 0.2% of data or < {rare_threshold:.0f} occurrences): {len(rare_categories)}"
-    )
+    print(f"Rare categories (< 0.2% of data or < {rare_threshold:.0f} occurrences): {len(rare_categories)}")
     print(f"Top 10 values:\n{value_counts.head(10)}")
 
 # %% [markdown]
@@ -633,26 +687,39 @@ for col in high_cardinality_cols:
 #
 # ----------------------------------
 
-# %% [markdown]
-# ## Preprocessing Pipeline
-
-# %%
-df_cleaned.info()
-
 # %%
 df_cleaned["Body"].value_counts()
 
-# %% [raw]
-# We need to
-# [] Add the new transformed fields and drop the un transformed ones
-# [] Scale the  data (try different scalers in the grid search)
-# [] One hot encode the Fuel type
-# [] Ordinal Encode Condition field, Used, Reconditioned, New
-# [] One-hot encode Transmission field: Automatic, Manual, Tiptonic, Other transmission
-# [] Impute "Body" field with constant "Unknown" or something similiar
-# [] One-hot encode Body field: Hatchback,SUV / 4x4, Station wagon, MPV, CoupÃ©/Sports,Convertible
-# [] Bag of words the Description: https://stackoverflow.com/questions/30653642/combining-bag-of-words-and-other-features-in-one-model-using-sklearn-and-pandas
-# [] Bag of words the Edition: Edition (could try and use a small vocab for this one, i think it would be worth it) or shove it into grid search ?
+# %% [markdown]
+# # Preprocessing
+
+# %% [markdown]
+# ## Preprocessing Pipeline
+
+# %% [markdown]
+# -----------
+# We need to:
+#
+# [X] Add the new transformed fields and drop the un transformed ones
+#
+# [X] Scale the  data (try different scalers in the grid search)
+#
+# [X] One hot encode the Fuel type
+#
+# [X] Ordinal Encode Condition field, Used, Reconditioned, New
+#
+# [X] One-hot encode Transmission field: Automatic, Manual, Tiptonic, Other transmission
+#
+# [X] Impute "Body" field with constant "Unknown" or something similiar
+#
+# [X] One-hot encode Body field: Hatchback,SUV / 4x4, Station wagon, MPV, CoupÃ©/Sports,Convertible
+#
+# [X] Bag of words the Description: https://stackoverflow.com/questions/30653642/combining-bag-of-words-and-other-features-in-one-model-using-sklearn-and-pandas
+#
+# [X] Impute Edition with unknown
+#
+# [X] Bag of words the Edition: Edition (could try and use a small vocab for this one, i think it would be worth it) or shove it into grid search ?
+#
 
 # %%
 from sklearn.preprocessing import (
@@ -721,9 +788,7 @@ preprocessing_pipeline_A = Pipeline(
                 [
                     (
                         "model_location_encoder",
-                        TargetEncoder(
-                            categories="auto", target_type="continuous", smooth="auto", cv=5
-                        ),
+                        TargetEncoder(categories="auto", target_type="continuous", smooth="auto", cv=5),
                         ["Model", "Location"],
                     )
                 ],
@@ -733,13 +798,13 @@ preprocessing_pipeline_A = Pipeline(
         ),
         ("frequency_encode", FrequencyEncoderTransformer(columns=["Seller_name"])),
         (
-            "impute_body",
+            "impute_missing",
             ColumnTransformer(
                 [
                     (
-                        "body_imputer",
+                        "body_edition_imputer",
                         SimpleImputer(strategy="constant", fill_value="unknown"),
-                        ["Body"],
+                        ["Body", "Edition"],
                     ),
                 ],
                 remainder="passthrough",
@@ -796,23 +861,17 @@ preprocessing_pipeline_A = Pipeline(
                     ),
                     (
                         "fuel_encoder",
-                        OneHotEncoder(
-                            drop="first", sparse_output=False, handle_unknown="ignore"
-                        ),
+                        OneHotEncoder(drop="first", sparse_output=False, handle_unknown="ignore"),
                         ["Fuel"],
                     ),
                     (
                         "transmission_encoder",
-                        OneHotEncoder(
-                            drop="first", sparse_output=False, handle_unknown="ignore"
-                        ),
+                        OneHotEncoder(drop="first", sparse_output=False, handle_unknown="ignore"),
                         ["Transmission"],
                     ),
                     (
                         "body_encoder",
-                        OneHotEncoder(
-                            drop="first", sparse_output=False, handle_unknown="ignore"
-                        ),
+                        OneHotEncoder(drop="first", sparse_output=False, handle_unknown="ignore"),
                         ["Body"],
                     ),
                 ],
@@ -826,16 +885,12 @@ preprocessing_pipeline_A = Pipeline(
                 [
                     (
                         "description_bow",
-                        CountVectorizer(
-                            max_features=50, lowercase=True, stop_words="english"
-                        ),
+                        CountVectorizer(max_features=50, lowercase=True, stop_words="english"),
                         "Description",
                     ),
                     (
                         "edition_bow",
-                        CountVectorizer(
-                            max_features=30, lowercase=True, stop_words="english"
-                        ),
+                        CountVectorizer(max_features=30, lowercase=True, stop_words="english"),
                         "Edition",
                     ),
                 ],
@@ -858,9 +913,7 @@ preprocessing_pipeline_B = Pipeline(
                 [
                     (
                         "model_location_encoder",
-                        TargetEncoder(
-                            categories="auto", target_type="continuous", smooth="auto", cv=5
-                        ),
+                        TargetEncoder(categories="auto", target_type="continuous", smooth="auto", cv=5),
                         ["Model", "Location"],
                     )
                 ],
@@ -870,13 +923,13 @@ preprocessing_pipeline_B = Pipeline(
         ),
         ("frequency_encode", FrequencyEncoderTransformer(columns=["Seller_name"])),
         (
-            "impute_body",
+            "impute_missing",
             ColumnTransformer(
                 [
                     (
-                        "body_imputer",
+                        "body_edition_imputer",
                         SimpleImputer(strategy="constant", fill_value="unknown"),
-                        ["Body"],
+                        ["Body", "Edition"],
                     ),
                 ],
                 remainder="passthrough",
@@ -941,23 +994,17 @@ preprocessing_pipeline_B = Pipeline(
                     ),
                     (
                         "fuel_encoder",
-                        OneHotEncoder(
-                            drop="first", sparse_output=False, handle_unknown="ignore"
-                        ),
+                        OneHotEncoder(drop="first", sparse_output=False, handle_unknown="ignore"),
                         ["Fuel"],
                     ),
                     (
                         "transmission_encoder",
-                        OneHotEncoder(
-                            drop="first", sparse_output=False, handle_unknown="ignore"
-                        ),
+                        OneHotEncoder(drop="first", sparse_output=False, handle_unknown="ignore"),
                         ["Transmission"],
                     ),
                     (
                         "body_encoder",
-                        OneHotEncoder(
-                            drop="first", sparse_output=False, handle_unknown="ignore"
-                        ),
+                        OneHotEncoder(drop="first", sparse_output=False, handle_unknown="ignore"),
                         ["Body"],
                     ),
                 ],
@@ -971,16 +1018,12 @@ preprocessing_pipeline_B = Pipeline(
                 [
                     (
                         "description_bow",
-                        CountVectorizer(
-                            max_features=50, lowercase=True, stop_words="english"
-                        ),
+                        CountVectorizer(max_features=50, lowercase=True, stop_words="english"),
                         "Description",
                     ),
                     (
                         "edition_bow",
-                        CountVectorizer(
-                            max_features=30, lowercase=True, stop_words="english"
-                        ),
+                        CountVectorizer(max_features=30, lowercase=True, stop_words="english"),
                         "Edition",
                     ),
                 ],
@@ -1019,27 +1062,23 @@ warnings.filterwarnings("ignore")
 
 # %%
 price_transformer = PowerTransformer(method="yeo-johnson")
-y_train_transformed = price_transformer.fit_transform(
-    y_train.values.reshape(-1, 1)
-).ravel()
+y_train_transformed = price_transformer.fit_transform(y_train.values.reshape(-1, 1)).ravel()
 y_val_transformed = price_transformer.transform(y_val.values.reshape(-1, 1)).ravel()
+
 
 # %%
 def check_fit(model, X_train, y_train, X_val, y_val, price_transformer):
     y_train_pred_transformed = model.predict(X_train)
-    y_train_pred = price_transformer.inverse_transform(
-        y_train_pred_transformed.reshape(-1, 1)
-    ).ravel()
+    y_train_pred = price_transformer.inverse_transform(y_train_pred_transformed.reshape(-1, 1)).ravel()
 
     y_val_pred_transformed = model.predict(X_val)
-    y_val_pred = price_transformer.inverse_transform(
-        y_val_pred_transformed.reshape(-1, 1)
-    ).ravel()
+    y_val_pred = price_transformer.inverse_transform(y_val_pred_transformed.reshape(-1, 1)).ravel()
 
     train_mae = mean_absolute_error(y_train, y_train_pred)
     val_mae = mean_absolute_error(y_val, y_val_pred)
 
     return train_mae, val_mae
+
 
 # %% [markdown]
 # ## Ridge Regression Experiments
@@ -1133,8 +1172,8 @@ full_pipeline_B = Pipeline(
 
 param_grid_B = {
     "preprocessing__scaler": [StandardScaler(), RobustScaler(), None],
-    "preprocessing__text_features__description_bow__max_features": [100,1000,5000],
-    "preprocessing__text_features__edition_bow__max_features": [100,1000,5000],
+    "preprocessing__text_features__description_bow__max_features": [100, 1000, 5000],
+    "preprocessing__text_features__edition_bow__max_features": [100, 1000, 5000],
     "preprocessing__poly_features__poly__degree": [1, 2],
     "preprocessing__poly_features__poly__interaction_only": [False, True],
     "preprocessing__feature_selection": [

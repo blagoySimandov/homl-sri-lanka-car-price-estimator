@@ -1,0 +1,15 @@
+[tool.ruff]
+line-length = 150
+select = ["E", "F", "I", "N", "Q"]         # common Ruff codes; adjust as needed
+ignore = []
+exclude = ["__pycache__", "build", "dist"]
+
+[tool.ruff.format]
+quote-style = "double" # force double quotes
+indent-style = "space"
+# Ruff cannot fully control bracket wrapping; Black handles that.
+
+[tool.black]
+line-length = 150
+skip-string-normalization = true # keep your double quotes
+target-version = ["py310"]       # adjust to your Python version
