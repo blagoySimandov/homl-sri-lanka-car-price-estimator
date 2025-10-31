@@ -408,7 +408,7 @@ plt.figure(figsize=(10, 8))
 
 for i, col in enumerate(cols, 1):
     plt.subplot(3, 1, i)
-    plt.scatter(df_cleaned.index, df_cleaned[col], alpha=0.6)
+    plt.scatter(df_train_copy.index, df_train_copy[col], alpha=0.6)
     plt.title(col)
     plt.xlabel("Index")
     plt.ylabel(col)
@@ -418,12 +418,37 @@ plt.tight_layout()
 plt.show()
 
 
+# %%
+df_train_copy.sort_values("Price",ascending=False).head()
+
+# %%
+df_train_copy.sort_values("Mileage",ascending=False).head()
+
+# %%
+df_train_copy.sort_values("Capacity",ascending=False).head()
+
 # %% [markdown]
 #
 # There are a few outliers I need to clip. Seems like the point of clipping woiuld be around 1.0*1e8 or somewhere
 # between 0.75 and 1 for price, 6000 for capacity and for mileage maybe between 0.6 and 0.8 * 0.e6
 #
 # ------------------
+#
+# I think I might actually do this in the data cleaning stage since some of the values (especially for price) just feel invalid.
+# A used toyota  def isn't worth 179000000 (587422.15 USD)
+#
+# but some others  like the Range rovesr are accurate.
+# For the capacity some are actually adequte wile others are just mistypings:
+# Perodia Viva Elite is 1000 Capacity not 10 000 (one more zero)
+#
+# I think the best way to handle this is 1. Clip Capacityand Price in data cleaning.
+#
+# Capacity clipping point: 6500cc
+# Price clipping point: 126500000 Rs (415k)
+# Mileage: no clipping ( I don't think i can draw a good line between the outliers and acutal data..)
+#
+#
+#
 
 # %%
 top_brands = df_train_copy["Brand"].value_counts().head(10).index
