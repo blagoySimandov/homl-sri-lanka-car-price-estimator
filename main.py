@@ -281,6 +281,27 @@ class DatetimeToUnixTransformer(BaseEstimator, TransformerMixin):
         return X
 
 
+class OutlierClipperTransformer(BaseEstimator, TransformerMixin):
+    def __init__(self, clip_config):
+        self.clip_config = clip_config
+
+    def fit(self, X, y=None):
+        return self
+
+    def transform(self, X):
+        X = X.copy()
+        for col, bounds in self.clip_config.items():
+            if col in X.columns:
+                lower, upper = bounds
+                if lower is not None and upper is not None:
+                    X[col] = X[col].clip(lower=lower, upper=upper)
+                elif upper is not None:
+                    X[col] = X[col].clip(upper=upper)
+                elif lower is not None:
+                    X[col] = X[col].clip(lower=lower)
+        return X
+
+
 # %%
 cleaning_pipeline = Pipeline(
     [
@@ -293,6 +314,15 @@ cleaning_pipeline = Pipeline(
                     "Capacity": r"\s*cc\s*$",
                     "Mileage": r"\s*km\s*$",
                     "Price": r"^Rs\s*",
+                }
+            ),
+        ),
+        (
+            "clip_outliers",
+            OutlierClipperTransformer(
+                clip_config={
+                    "Capacity": (None, 6500),
+                    "Price": (None, 126500000),
                 }
             ),
         ),
@@ -400,6 +430,7 @@ skew(df_cleaned["Mileage"]), skew(df_cleaned["Price"])
 # %% [markdown]
 # --------------------------------------
 # Let's take a look at some outliers.
+# Note: This analysis is done on df_train_copy in EDA. The actual clipping is applied earlier in the data cleaning pipeline.
 
 # %%
 cols = ["Mileage", "Capacity", "Price"]
@@ -708,6 +739,7 @@ for col in high_cardinality_cols:
 # Since there are too many of them.
 #
 # For the location  a target encoding would work wehll. As it *should* tell us the mean price fore a certain location.
+# We won't capture relationship between location closeness this way but it's simpler..
 #
 #
 # ----------------------------------
@@ -777,7 +809,8 @@ class CarAgeTransformer(BaseEstimator, TransformerMixin):
     def transform(self, X):
         X = X.copy()
         X["Car_Age"] = self.current_year - X["Year"]
-        return X.drop(columns=["Year"])
+        #keeping year (not dropping it) even though they are very similar (I tested with and without year and with year leads to a 5% improvement)
+        return X 
 
 
 # %%
@@ -803,9 +836,17 @@ class FrequencyEncoderTransformer(BaseEstimator, TransformerMixin):
         return X
 
 
+# %% [markdown]
+# --------------
+# Since i have two different pipelines for the sake of code quality I have created a common steps part
+# which will then get combined to each of the two different once
+# Reasonsing behind the differnec in the pipelines will be given during model selection below
+#
+# ----------------
+
 # %%
-preprocessing_pipeline_A = Pipeline(
-    [
+def create_common_steps_start():
+    return [
         ("add_car_age", CarAgeTransformer(current_year=2025)),
         (
             "target_encode",
@@ -854,141 +895,101 @@ preprocessing_pipeline_A = Pipeline(
                 verbose_feature_names_out=False,
             ).set_output(transform="pandas"),
         ),
+    ]
+
+
+def create_common_steps_end():
+    return [
+        (
+            "one_hot_encoding",
+            ColumnTransformer(
+                [
+                    (
+                        "brand_encoder",
+                        OneHotEncoder(
+                            drop="first",
+                            sparse_output=False,
+                            handle_unknown="infrequent_if_exist",
+                            min_frequency=0.005,
+                        ),
+                        ["Brand"],
+                    ),
+                    (
+                        "fuel_encoder",
+                        OneHotEncoder(drop="first", sparse_output=False, handle_unknown="ignore"),
+                        ["Fuel"],
+                    ),
+                    (
+                        "transmission_encoder",
+                        OneHotEncoder(drop="first", sparse_output=False, handle_unknown="ignore"),
+                        ["Transmission"],
+                    ),
+                    (
+                        "body_encoder",
+                        OneHotEncoder(drop="first", sparse_output=False, handle_unknown="ignore"),
+                        ["Body"],
+                    ),
+                ],
+                remainder="passthrough",
+                verbose_feature_names_out=False,
+            ).set_output(transform="pandas"),
+        ),
+        (
+            "text_features",
+            ColumnTransformer(
+                [
+                    (
+                        "description_bow",
+                        CountVectorizer(max_features=50, lowercase=True, stop_words="english"),
+                        "Description",
+                    ),
+                    (
+                        "edition_bow",
+                        CountVectorizer(max_features=30, lowercase=True, stop_words="english"),
+                        "Edition",
+                    ),
+                ],
+                remainder="passthrough",
+                verbose_feature_names_out=False,
+            ),
+        ),
+        ("feature_selection", None),
+        ("scaler", None),
+    ]
+
+# %% [markdown]
+# Pipeline A: Power transforms Car_Age, Mileage, Capacity
+# Pipeline B: Polynomial features on Mileage+Capacity + Year, power transform only Car_Age
+
+# %%
+preprocessing_pipeline_A = Pipeline(
+    create_common_steps_start()
+    + [
         (
             "power_transform",
             ColumnTransformer(
                 [
                     ("car_age_yj", PowerTransformer(method="yeo-johnson"), ["Car_Age"]),
                     ("mileage_yj", PowerTransformer(method="yeo-johnson"), ["Mileage"]),
-                    (
-                        "capacity_yj",
-                        PowerTransformer(method="yeo-johnson"),
-                        ["Capacity"],
-                    ),
+                    ("capacity_yj", PowerTransformer(method="yeo-johnson"), ["Capacity"]),
+                    ("year_yj", PowerTransformer(method="yeo-johnson"), ["Year"]),#Im keeping year even tho it correlates with car age we can always remove it in feature selection
                 ],
                 remainder="passthrough",
                 verbose_feature_names_out=False,
             ).set_output(transform="pandas"),
         ),
-        (
-            "one_hot_encoding",
-            ColumnTransformer(
-                [
-                    (
-                        "brand_encoder",
-                        OneHotEncoder(
-                            drop="first",
-                            sparse_output=False,
-                            handle_unknown="infrequent_if_exist",
-                            min_frequency=0.005,
-                        ),
-                        ["Brand"],
-                    ),
-                    (
-                        "fuel_encoder",
-                        OneHotEncoder(drop="first", sparse_output=False, handle_unknown="ignore"),
-                        ["Fuel"],
-                    ),
-                    (
-                        "transmission_encoder",
-                        OneHotEncoder(drop="first", sparse_output=False, handle_unknown="ignore"),
-                        ["Transmission"],
-                    ),
-                    (
-                        "body_encoder",
-                        OneHotEncoder(drop="first", sparse_output=False, handle_unknown="ignore"),
-                        ["Body"],
-                    ),
-                ],
-                remainder="passthrough",
-                verbose_feature_names_out=False,
-            ).set_output(transform="pandas"),
-        ),
-        (
-            "text_features",
-            ColumnTransformer(
-                [
-                    (
-                        "description_bow",
-                        CountVectorizer(max_features=50, lowercase=True, stop_words="english"),
-                        "Description",
-                    ),
-                    (
-                        "edition_bow",
-                        CountVectorizer(max_features=30, lowercase=True, stop_words="english"),
-                        "Edition",
-                    ),
-                ],
-                remainder="passthrough",
-                verbose_feature_names_out=False,
-            ),
-        ),
-        ("feature_selection", None),
-        ("scaler", None),
     ]
+    + create_common_steps_end()
 )
 
 # %%
 preprocessing_pipeline_B = Pipeline(
-    [
-        ("add_car_age", CarAgeTransformer(current_year=2025)),
-        (
-            "target_encode",
-            ColumnTransformer(
-                [
-                    (
-                        "model_location_encoder",
-                        TargetEncoder(categories="auto", target_type="continuous", smooth="auto", cv=5),
-                        ["Model", "Location"],
-                    )
-                ],
-                remainder="passthrough",
-                verbose_feature_names_out=False,
-            ).set_output(transform="pandas"),
-        ),
-        ("frequency_encode", FrequencyEncoderTransformer(columns=["Seller_name"])),
-        (
-            "impute_missing",
-            ColumnTransformer(
-                [
-                    (
-                        "body_edition_imputer",
-                        SimpleImputer(strategy="constant", fill_value="unknown"),
-                        ["Body", "Edition"],
-                    ),
-                ],
-                remainder="passthrough",
-                verbose_feature_names_out=False,
-            ).set_output(transform="pandas"),
-        ),
-        (
-            "ordinal_encoding",
-            ColumnTransformer(
-                [
-                    (
-                        "condition_encoder",
-                        OrdinalEncoder(
-                            categories=[["used", "reconditioned", "new"]],
-                            handle_unknown="use_encoded_value",
-                            unknown_value=-1,
-                        ),
-                        ["Condition"],
-                    ),
-                ],
-                remainder="passthrough",
-                verbose_feature_names_out=False,
-            ).set_output(transform="pandas"),
-        ),
+    create_common_steps_start()
+    + [
         (
             "poly_features",
             ColumnTransformer(
-                [
-                    (
-                        "poly",
-                        PolynomialFeatures(),
-                        ["Mileage", "Capacity"],
-                    )
-                ],
+                [("poly", PolynomialFeatures(), ["Mileage", "Capacity"])],
                 remainder="passthrough",
                 verbose_feature_names_out=False,
             ).set_output(transform="pandas"),
@@ -998,67 +999,14 @@ preprocessing_pipeline_B = Pipeline(
             ColumnTransformer(
                 [
                     ("car_age_yj", PowerTransformer(method="yeo-johnson"), ["Car_Age"]),
+                    ("year_yj", PowerTransformer(method="yeo-johnson"), ["Year"]),
                 ],
                 remainder="passthrough",
                 verbose_feature_names_out=False,
             ).set_output(transform="pandas"),
         ),
-        (
-            "one_hot_encoding",
-            ColumnTransformer(
-                [
-                    (
-                        "brand_encoder",
-                        OneHotEncoder(
-                            drop="first",
-                            sparse_output=False,
-                            handle_unknown="infrequent_if_exist",
-                            min_frequency=0.005,
-                        ),
-                        ["Brand"],
-                    ),
-                    (
-                        "fuel_encoder",
-                        OneHotEncoder(drop="first", sparse_output=False, handle_unknown="ignore"),
-                        ["Fuel"],
-                    ),
-                    (
-                        "transmission_encoder",
-                        OneHotEncoder(drop="first", sparse_output=False, handle_unknown="ignore"),
-                        ["Transmission"],
-                    ),
-                    (
-                        "body_encoder",
-                        OneHotEncoder(drop="first", sparse_output=False, handle_unknown="ignore"),
-                        ["Body"],
-                    ),
-                ],
-                remainder="passthrough",
-                verbose_feature_names_out=False,
-            ).set_output(transform="pandas"),
-        ),
-        (
-            "text_features",
-            ColumnTransformer(
-                [
-                    (
-                        "description_bow",
-                        CountVectorizer(max_features=50, lowercase=True, stop_words="english"),
-                        "Description",
-                    ),
-                    (
-                        "edition_bow",
-                        CountVectorizer(max_features=30, lowercase=True, stop_words="english"),
-                        "Edition",
-                    ),
-                ],
-                remainder="passthrough",
-                verbose_feature_names_out=False,
-            ),
-        ),
-        ("feature_selection", None),
-        ("scaler", None),
     ]
+    + create_common_steps_end()
 )
 
 # %%
@@ -1079,6 +1027,10 @@ from sklearn.neighbors import KNeighborsRegressor
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+
+# %% [markdown]
+# Warnings flood the console and it gets annoying. I know it's not a good practice to ignore all of them
+# but f**k it.
 
 # %%
 import warnings
@@ -1108,29 +1060,36 @@ def check_fit(model, X_train, y_train, X_val, y_val, price_transformer):
 # %% [markdown]
 # ## Ridge Regression Experiments
 #
-# We start with Ridge regression because:
-# 1. It handles multicollinearity well
-# 2. Built-in regularization prevents overfitting
-# 3. Works well with power-transformed features
+# We start with Ridge regression because it handles multicollinearity well (and god do we have a lot of columns now :D)
 #
 # ### Feature Selection Strategy
 #
-# After the initial experiments showed ~1.3M MAE, we added feature selection to:
-# - Reduce noise from irrelevant features
-# - Combat overfitting (fewer features = simpler model)
-# - Improve model generalization
+# After the initial experiments showed ~1.3M MAE, I added feature selection but this did not improve the error by a lot
+# only around 100k...
 #
-# We test two approaches:
-# - **TruncatedSVD**: Dimensionality reduction that captures latent patterns (great for text features)
 #
+# I had a lot of trouble with the combination of polynomial and power transformed features 
+# (apparently if you first power transform a feature and then add polynomial features from it the model goes nuts and
+# starts spewing out and error higher than even the mean!)
+#
+# So I tested two variants
 # ### Variant A: No Polynomial Features
 #
-# This is our clean baseline. We apply:
-# - Power transform to Car_Age, Mileage, Capacity
+# This is our clean baseline
+# - Power transform to Car_Age, Mileage, Capacity, Year
 # - Target encoding for Model/Location
 # - One-hot encoding for categorical features
 # - Bag-of-words for text features
-# - Optional feature selection (None, TruncatedSVD, or SelectKBest)
+# - Optional feature selection (None, TruncatedSVD)
+#
+# RESULTS:
+# ```
+# Best MAE (CV): 0.22
+# Best params: {'model__alpha': 10, 'preprocessing__feature_selection': None, 'preprocessing__scaler': RobustScaler(), 'preprocessing__text_features__description_bow__max_features': 50, 'preprocessing__text_features__edition_bow__max_features': 50}
+#
+# Train MAE: 1,247,850.77
+# Validation MAE: 1,232,164.04
+# ```
 
 # %%
 full_pipeline_A = Pipeline(
@@ -1148,17 +1107,12 @@ param_grid_A = {
         None,
         TruncatedSVD(n_components=50),
         TruncatedSVD(n_components=100),
-        SelectKBest(f_regression, k=50),
-        SelectKBest(f_regression, k=100),
     ],
     "model__alpha": [0.01, 0.1, 1, 10, 100],
 }
 
 # %%
-print("=" * 80)
-print("VARIANT A: No Polynomial Features (Baseline)")
-print("=" * 80)
-
+print("VARIANT A: No Polynomial Features")
 grid_search_A = GridSearchCV(
     full_pipeline_A,
     param_grid_A,
@@ -1169,11 +1123,11 @@ grid_search_A = GridSearchCV(
 )
 grid_search_A.fit(X_train, y_train_transformed)
 
-print(f"\nBest MAE (CV): {-grid_search_A.best_score_:,.2f}")
+print(f"Best MAE (CV): {-grid_search_A.best_score_:,.2f}")
 print(f"Best params: {grid_search_A.best_params_}")
 
 train_mae_A, val_mae_A = check_fit(grid_search_A, X_train, y_train, X_val, y_val, price_transformer)
-print(f"\nTrain MAE: {train_mae_A:,.2f}")
+print(f"Train MAE: {train_mae_A:,.2f}")
 print(f"Validation MAE: {val_mae_A:,.2f}")
 
 # %% [markdown]
@@ -1181,13 +1135,48 @@ print(f"Validation MAE: {val_mae_A:,.2f}")
 #
 # This variant tests whether feature interactions help:
 # - Create polynomial features from RAW Mileage and Capacity first
-# - Then apply power transform to Car_Age (and polynomial features pass through)
+# - Then apply power transform to Car_Age and Year (they have the best correlation with price when transformed)
 # - Everything else same as Variant A
 #
-# **Why this order?** Polynomials on raw features make sense (e.g., Mileage × Capacity).
-# Polynomials on power-transformed features create numerical chaos (belive me i tried and i got an errro worse than the dummy, around 5mil)
+# **Why this order?**
+# Polynomials on raw features make sense  Mileage * Capacity.
+# Polynomials on power-transformed features create numerical chaos (believe me i tried and i got an error worse than the dummy, around 5mil)
+#
+#
+# Best params and score:
+# ```
+# Best MAE (CV): 0.19
+# Best params: {'model__alpha': 10, 'preprocessing__feature_selection': TruncatedSVD(n_components=300), 'preprocessing__poly_features__poly__degree': 3, 'preprocessing__poly_features__poly__interaction_only': False, 'preprocessing__scaler': None, 'preprocessing__text_features__description_bow__max_features': 50, 'preprocessing__text_features__edition_bow__max_features': 3000}
+# Train MAE: 1,149,994.71
+# Validation MAE: 1,146,156.91
+# ```
 
 # %%
+#Pipeline i tried first:
+# full_pipeline_B = Pipeline(
+#     [
+#         ("preprocessing", preprocessing_pipeline_B),
+#         ("model", Ridge()),
+#     ]
+# )
+
+# param_grid_B = {
+#     "preprocessing__scaler": [StandardScaler(), RobustScaler(), None],
+#     "preprocessing__text_features__description_bow__max_features": [50,100,1000],# Tried a lot of variables here as well
+#     "preprocessing__text_features__edition_bow__max_features": [50,3000], # tried a lot of variables 50 is best
+#     "preprocessing__poly_features__poly__degree": [1, 2,3],
+#     "preprocessing__poly_features__poly__interaction_only": [False, True],
+#     "preprocessing__feature_selection": [
+#         None,
+#         TruncatedSVD(n_components=100),
+#         TruncatedSVD(n_components=300),
+#     ],
+#     "model__alpha": [10,13, 20],# I tried a lot of alphas here, including 0.1, 0,2, 0.5, 1, 5
+# }
+
+# %%
+
+#I'm making the pipeline really small to not run forever. above i have copypasted and commented out the code of the piple i ran.
 full_pipeline_B = Pipeline(
     [
         ("preprocessing", preprocessing_pipeline_B),
@@ -1196,23 +1185,23 @@ full_pipeline_B = Pipeline(
 )
 
 param_grid_B = {
-    "preprocessing__scaler": [StandardScaler(), RobustScaler(), None],
-    "preprocessing__text_features__description_bow__max_features": [100, 1000, 5000],
-    "preprocessing__text_features__edition_bow__max_features": [100, 1000, 5000],
-    "preprocessing__poly_features__poly__degree": [1, 2],
-    "preprocessing__poly_features__poly__interaction_only": [False, True],
+    "preprocessing__scaler": [None], # Tried some stuff here but it doesn't like scaling (-_-)
+    "preprocessing__text_features__description_bow__max_features": [50],# Tried a lot of variables here as well
+    "preprocessing__text_features__edition_bow__max_features": [3000,5000], # tried a lot of variables 50 is best
+    "preprocessing__poly_features__poly__degree": [3,4],
+    "preprocessing__poly_features__poly__interaction_only": [False],
     "preprocessing__feature_selection": [
-        None,
-        TruncatedSVD(n_components=100),
         TruncatedSVD(n_components=300),
+        TruncatedSVD(n_components=500),
+        TruncatedSVD(n_components=1000),
     ],
-    "model__alpha": [0.01, 0.1, 1, 10, 100],
+    "model__alpha": [10],# I tried a lot of alphas here, including 0.1, 0,2, 0.5, 1, 5
 }
 
 # %%
-print("\n" + "=" * 80)
+
 print("VARIANT B: Polynomial Features Before Power Transform")
-print("=" * 80)
+
 
 grid_search_B = GridSearchCV(
     full_pipeline_B,
@@ -1224,12 +1213,25 @@ grid_search_B = GridSearchCV(
 )
 grid_search_B.fit(X_train, y_train_transformed)
 
-print(f"\nBest MAE (CV): {-grid_search_B.best_score_:,.2f}")
+
+# %%
+
+print(f"Best MAE (CV): {-grid_search_B.best_score_:,.2f}")
 print(f"Best params: {grid_search_B.best_params_}")
 
 train_mae_B, val_mae_B = check_fit(grid_search_B, X_train, y_train, X_val, y_val, price_transformer)
-print(f"\nTrain MAE: {train_mae_B:,.2f}")
+print(f"Train MAE: {train_mae_B:,.2f}")
 print(f"Validation MAE: {val_mae_B:,.2f}")
+
+# %% [markdown]
+# Best params and score:
+#
+# ```
+# Best MAE (CV): 0.18
+# Best params: {'model__alpha': 10, 'preprocessing__feature_selection': TruncatedSVD(n_components=1000), 'preprocessing__poly_features__poly__degree': 3, 'preprocessing__poly_features__poly__interaction_only': False, 'preprocessing__scaler': None, 'preprocessing__text_features__description_bow__max_features': 50, 'preprocessing__text_features__edition_bow__max_features': 3000}
+# Train MAE: 1,097,626.17
+# Validation MAE: 1,115,638.54
+# ```
 
 # %% [markdown]
 # ### Ridge Results Comparison
@@ -1237,27 +1239,29 @@ print(f"Validation MAE: {val_mae_B:,.2f}")
 # Let's see which variant performs better. We'll use the winner's preprocessing pipeline for the other models.
 
 # %%
-print("\n" + "=" * 80)
-print("COMPARISON SUMMARY")
-print("=" * 80)
-print(f"\nVariant A (No Polynomials):")
+print(f" Variant A (No Polynomials):")
 print(f"  CV MAE: {-grid_search_A.best_score_:,.2f}")
 print(f"  Train MAE: {train_mae_A:,.2f}")
 print(f"  Val MAE: {val_mae_A:,.2f}")
 
-print(f"\nVariant B (Poly Before Transform):")
+print(f" Variant B (Poly Before Transform):")
 print(f"  CV MAE: {-grid_search_B.best_score_:,.2f}")
 print(f"  Train MAE: {train_mae_B:,.2f}")
 print(f"  Val MAE: {val_mae_B:,.2f}")
 
-if val_mae_A < val_mae_B:
-    print(f"\n✓ Variant A is better by {val_mae_B - val_mae_A:,.2f}")
-    best_ridge_model = grid_search_A
-    best_preprocessing = preprocessing_pipeline_A
-else:
-    print(f"\n✓ Variant B is better by {val_mae_A - val_mae_B:,.2f}")
-    best_ridge_model = grid_search_B
-    best_preprocessing = preprocessing_pipeline_B
+# %% [markdown]
+# -----------
+# Comparasion
+# ```
+#  Variant A (No Polynomials):
+#   CV MAE: 0.20
+#   Train MAE: 1,247,850.77
+#   Val MAE: 1,232,164.04
+#  Variant B (Poly Before Transform):
+#   CV MAE: 0.18
+#   Train MAE: 1,097,626.17
+#   Val MAE: 1,115,638.54
+# ```
 
 # %% [markdown]
 # ## KNN Regressor
@@ -1301,7 +1305,7 @@ random_search_knn = RandomizedSearchCV(
     scoring="neg_mean_absolute_error",
     n_jobs=-1,
     verbose=2,
-    random_state=42,
+    random_state=rngs,
 )
 random_search_knn.fit(X_train, y_train_transformed)
 
@@ -1355,7 +1359,7 @@ random_search_rf = RandomizedSearchCV(
     scoring="neg_mean_absolute_error",
     n_jobs=-1,
     verbose=2,
-    random_state=42,
+    random_state=rngs,
 )
 random_search_rf.fit(X_train, y_train_transformed)
 
@@ -1384,7 +1388,7 @@ results = {
 }
 
 for model_name, (model, cv_mae, train_mae, val_mae) in results.items():
-    print(f"\n{model_name}:")
+    print(f" {model_name}:")
     print(f"  CV MAE: {cv_mae:,.2f}")
     print(f"  Train MAE: {train_mae:,.2f}")
     print(f"  Val MAE: {val_mae:,.2f}")
