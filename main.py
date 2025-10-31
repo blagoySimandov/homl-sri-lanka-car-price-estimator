@@ -1,14 +1,10 @@
 # %% [markdown]
-# # Load the dataset
+# # Load the dataset and intial "exploration"
 # %%
 import pandas as pd
 
-# Load the dataset
 df = pd.read_csv("dataset_vehicles.csv")
 
-# Display basic information about the dataset
-print(f"Dataset shape: {df.shape}")
-print(f"\nFirst few rows:")
 df.head()
 
 # %%
@@ -19,37 +15,45 @@ df[df.duplicated()]
 # they posted their car twice. Nuke them :D
 
 # %%
-df.drop_duplicates().head()
+#df.drop_duplicates().head()
 
 
 # %% [markdown]
-# hmm but this will drop  the duplicates that are duplicates for all columns. what if somebday marked his car with one column difference:?
+# Hmm but this will drop  the duplicates that are duplicates for all columns. What if somebday marked his car with one column difference ?
+# Example: Same description (probably the same car)? Or even better Same Description + Title + Subtitle (almost definetly same car)
 #
 
 # %%
 df[df.duplicated(subset=["Description"], keep=False) & ~df.duplicated()].sort_values(
     by=["Description"]
-)
+).head()
 
 
 # %%
 df["Post_URL"]
 
 # %% [markdown]
-# ### Post url seems useless might drop it
-
-# %%
-df
+# Post url seems useless might drop it
 
 # %%
 df["Seller_name"].value_counts()
 
 # %% [markdown]
-# ### Seller name could be useful, maybe there is a correlation between names of big sellers and and car prices ?
-# Would be worth it to Pick the biggest N sellers and make everybody else have an "Unknown Seller"  type ?... Hmmm
+# -----------
+# Seller name could be useful, maybe there is a correlation between names of big sellers and and car prices ?
+# Would be worth it to Pick the biggest N sellers and make everybody else have an "Unknown Seller"  type ?
+
+# %%
+df.info()
 
 # %% [markdown]
-# The lengths is 18938 and we cans ee that there are null fields in the fields: Edition (13908/18938 entries) and Body (17038/18938). Due to Edition having too many nulls we can't really drop them... So we might have to think of another way to handle this. Let's look at the value counts of Edition.
+# The lengths is 18938 and we can see that there are null fields in the fields: Edition (13908/18938 entries) and Body (17038/18938). Due to Edition having too many nulls we can't really drop them... So we might have to think of another way to handle this. Let's look at the value counts of Edition.
+
+# %%
+df["Edition"].value_counts()
+
+# %% [markdown]
+# Hmm seems like a free text column. Might be worth normalizing it a bit. Maybe at least make everything lower case and run a bag of wrods on it ?
 
 # %%
 # how many sellers are seen more than 10 times
@@ -60,14 +64,14 @@ df[
 ]
 
 
-# %%
-df["Edition"].value_counts()
-
-# %%
-df[df["Description"].str.contains("", na=True)]
+# %% [markdown]
+#  12198 sellers out of 18k are seen more than 3 times. Not bad. Maybe differentiating the dealerships from the normal sellers might be worth it? We can either check this in the EDA stage by seeing if there is a price correlation between the two (size of dealership to price) or just put it in the model and have feature selection take care of it. I will decide on the approach later.
 
 # %% [markdown]
-# Hmm seems like a free text column. Might be worth normalizing it a bit. Maybe at least make everything lower case and run a bag of wrods on it ?
+# Checking if the description contains pricing information. We could technically use this. but I feel like it's (only 1000 rows have it and we aren't even sure whether it's accurate and it is talking about the price)
+
+# %%
+df[df["Description"].str.contains("Rs ", na=True)]
 
 # %%
 edition_lowercase = df["Edition"].str.lower()
@@ -104,7 +108,7 @@ df["Body"].value_counts()
 df["Fuel"].value_counts()
 
 # %% [markdown]
-# Clean as well.... Although not sure what Other Fuel type is
+# Clean as well.... Although not sure what "Other Fuel type" is
 
 # %%
 df[df["Fuel"] == "Other fuel type"].head()
@@ -114,7 +118,7 @@ df["Capacity"].value_counts()
 
 # %%
 # after trying to clean this i got a problem where magically everything became Null :D
-# so im now going back to see whetehr evertyhign follows teh format <NUMBER cc> :DDDDD
+# so im now going back to see whetehr evertyhing follows the format <NUMBER cc> :D
 
 # %%
 pattern = r"^\d+(\.\d+)?\s+cc$"
@@ -126,7 +130,7 @@ non_matching[["Capacity"]]
 # Okay yeah it's the commas that are the problem... I will just nuke them in the data cleaning layer
 
 # %%
-df.describe()
+df.info()
 
 # %% [markdown]
 # We can see that Body has null columns and Edition.... The null columns of body could be dropped as theya aren't many
@@ -141,7 +145,7 @@ df.describe()
 # One bit of advice is that sometimes the best way is to simply try different imputation methods on the train set and test it on the test set and compare results. Then choose the best one.
 # ```
 # So I might just leave it for now and try different ways to impute it later...
-# Although i will test it on the validation set since we don't really want any  leakadge... :D
+# Although i will test it on the validation set since we don't really want any  leakadge...
 #
 #
 #
@@ -150,7 +154,7 @@ df.describe()
 # Price, Mileage, Capacity, Date (unix ?)
 #
 # I should conider the location as well. I might be able to turn it into lat lon ?
-# I will look into this alter after i have  a cleaner dataset and i have experimented a bit...
+# I will look into this alter I have  a cleaner dataset and i have experimented a bit...
 #
 
 # %%
@@ -170,7 +174,7 @@ len(
 #
 # [ ] Convert Capacity to number by creating a transformer that removes " cc" at the end
 #
-# [ ] Nuke Seller_type because everyone is a premium member
+# [ ] Nuke Seller_type because everyone is a premium member (i found this out in EDA)
 #
 # [ ] Convert Mileage to number by creating a transformer that removes " km" at the end
 #
@@ -178,7 +182,7 @@ len(
 #
 # [ ] Make all text field lowercase string, remove urls
 #
-# [ ] Remove any duplicates
+# [ ] Remove any duplicates (maybe consider removing duplicates using a subset columns array)
 #
 # [ ] Drop Subtitle as it is just a free text version of concated posted date + location
 #
@@ -232,8 +236,9 @@ class TextCleanerTransformer(BaseEstimator, TransformerMixin):
 
         for col in self.text_columns:
             if col in X.columns:
-                X[col] = X[col].astype(str).str.lower()
-                X[col] = X[col].str.replace(url_pattern, "", regex=True).str.strip()
+                X[col] = X[col].apply(lambda v: v.lower() if isinstance(v, str) else v)
+                X[col] = X[col].replace(url_pattern, "", regex=True).str.strip()
+
         return X
 
 
@@ -293,45 +298,21 @@ class DatetimeToUnixTransformer(BaseEstimator, TransformerMixin):
 
 
 # %%
-cleaning_pipeline = Pipeline(
-    [
-        (
-            "drop_columns",
-            ColumnNukerTransformer(
-                columns_to_drop=["Post_URL", "Title", "Sub_title", "Seller_type"]
-            ),
-        ),
-        ("remove_duplicates", DuplicateRemoverTransformer()),
-        (
-            "clean_numeric",
-            NumericCleanerTransformer(
-                columns_config={
-                    "Capacity": r"\s*cc\s*$",
-                    "Mileage": r"\s*km\s*$",
-                    "Price": r"^Rs\s*",
-                }
-            ),
-        ),
-        (
-            "clean_text",
-            TextCleanerTransformer(
-                text_columns=["Edition", "Description", "Seller_name"]
-            ),
-        ),
-        (
-            "rename_columns",
-            ColumnRenamerTransformer(
-                rename_mapping={
-                    "published_date": "Published_Date"
-                }  # i just don't like the fact it is not following the pattern
-            ),
-        ),
-        (
-            "convert_datetime",
-            DatetimeToUnixTransformer(datetime_columns=["Published_Date"]),
-        ),
-    ]
-)
+cleaning_pipeline = Pipeline([
+    ("drop_columns", ColumnNukerTransformer(columns_to_drop=["Post_URL", "Title", "Sub_title", "Seller_type"])),
+    ("remove_duplicates", DuplicateRemoverTransformer()),
+    ("clean_numeric", NumericCleanerTransformer(columns_config={
+        "Capacity": r"\s*cc\s*$",
+        "Mileage": r"\s*km\s*$",
+        "Price": r"^Rs\s*",
+    })),
+    ("clean_text", TextCleanerTransformer(text_columns=["Edition", "Description", "Seller_name"])),
+    ("rename_columns", ColumnRenamerTransformer(rename_mapping={
+        "published_date": "Published_Date",  # keep consistent naming pattern
+    })),
+    ("convert_datetime", DatetimeToUnixTransformer(datetime_columns=["Published_Date"])),
+])
+
 
 # %%
 df_cleaned = cleaning_pipeline.fit_transform(df)
@@ -342,6 +323,23 @@ df_cleaned.head()
 # %%
 df_cleaned.info()
 
+# %%
+df_cleaned[df_cleaned["Edition"].isna()].head() 
+
+
+# %% [markdown]
+# --------------
+# I should look at this in EDA and see if there is a correlation between Edition missing ?
+# The question is:
+#
+# MCAR, MAR or MNAR: (taken from this https://medium.com/%40ajayverma23/data-imputation-a-comprehensive-guide-to-handling-missing-values-b5c7d11c3488)
+#
+# MCAR = Missing Completely At Random (the missingness has nothing to do with values or other features) 
+#
+# MAR = Missing At Random (missingness depends on other observed variables) 
+#
+# MNAR = Missing Not At Random
+
 # %% [markdown]
 # # Train-Test Split
 
@@ -350,13 +348,14 @@ from sklearn.model_selection import train_test_split
 
 X = df_cleaned.drop("Price", axis=1)
 y = df_cleaned["Price"]
+rngs = 42 # using this so we have reproduceability
 
 X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42
+    X, y, test_size=0.2, random_state=rngs
 )
 X_train, X_val, y_train, y_val = train_test_split(
-    X_train, y_train, test_size=0.25, random_state=42
-)
+    X_train, y_train, test_size=0.25, random_state=rngs
+)# 25 percent so that validation and test set are the same size
 
 df_train = X_train.copy()
 df_train["Price"] = y_train
@@ -376,14 +375,13 @@ print(f"test set size: {len(df_test)}")
 
 # %% [markdown]
 # There are a few things I want to check out.
-# 1. Relationship between Price and Brand
-# 2. Relationship between Price and Model
-# 3. Relationshhip between Price and Year
-# 4. Relationship between Body and Price
-# 5. Relationship between Seller_type and Price ( maybe premium sellers sell more expensive cars ? )
-# 6. Relationship between Fuel type and Price (If cetain fuel types are more expensive on average then maybe a good feature would be capacity + fuel type?? )
-# 7. Car age  to price
-# 8. Mileage per year -# chat gpt suggested this one :D
+#
+# 1. Check for skewed values
+#
+# 2. Check for relationships between columns
+#     Price to Body,Model,Year, Capacity, Mileage, Fuel Type
+# 3. Try some new features like: Car age and Mileage per year and see how predictive they are of the price. (check for non linear relationships as well)
+#    
 
 # %%
 import matplotlib.pyplot as plt
@@ -399,13 +397,9 @@ from scipy.stats import skew
 # Highly skeweed values (over 1) need to be transformed.
 skew(df_cleaned["Mileage"]), skew(df_cleaned["Price"])
 
-# %%
-plt.figure(figsize=(12, 6))
-plt.scatter(df_train.index, df_train["Price"], alpha=0.6, s=20)
-plt.xlabel("Index")
-plt.ylabel("Price")
-plt.grid(True, alpha=0.3)
-plt.show()
+# %% [markdown]
+# --------------------------------------
+# Let's take a look at some outliers. 
 
 # %%
 cols = ["Mileage", "Capacity", "Price"]
@@ -415,7 +409,7 @@ plt.figure(figsize=(10, 8))
 for i, col in enumerate(cols, 1):
     plt.subplot(3, 1, i)
     plt.scatter(df_cleaned.index, df_cleaned[col], alpha=0.6)
-    plt.title(f"{col} Outliers")
+    plt.title(col)
     plt.xlabel("Index")
     plt.ylabel(col)
     plt.grid(True)
@@ -425,7 +419,11 @@ plt.show()
 
 
 # %% [markdown]
-# There are a few outliers I need to clip. Seems like the point of clipping woiuld be around 1.0*1e8 or somewhere between 0.75 and 1 for price, 6000 for capacity and
+#
+# There are a few outliers I need to clip. Seems like the point of clipping woiuld be around 1.0*1e8 or somewhere
+# between 0.75 and 1 for price, 6000 for capacity and for mileage maybe between 0.6 and 0.8 * 0.e6
+#
+# ------------------
 
 # %%
 top_brands = df_train["Brand"].value_counts().head(10).index
@@ -444,7 +442,7 @@ plt.show()
 
 # %% [markdown]
 # Seems like a few brands are pretty representative (given the brand you can get a  a good price) this would be suzuki, nissan and honda.
-# Others like land rover don't really give as a lot of data on the price :D
+# Others like land rover don't really give as a lot of data on the price.
 #
 
 # %%
@@ -463,7 +461,7 @@ plt.tight_layout()
 plt.show()
 
 # %% [markdown]
-# Some do seem kinda representative ?
+# Some do seem kinda representative but nothing really strikes me here.
 
 # %% [markdown]
 # ## Car Age to Price
@@ -482,7 +480,7 @@ plt.tight_layout()
 plt.show()
 
 # %% [markdown]
-# Seems like a logarithmic relationship. With a really heavy tail
+# Seems like a logarithmic relationship. With a really heavy tail. Tranforming it with a power tranformation will help for the parametric models like linear regression and ridge.
 
 # %%
 
@@ -500,8 +498,14 @@ print(correlation)
 # %% [markdown]
 # Better. Not the best
 
-# %%
+# %% [markdown]
+# Transforming the target can sometimes be really beneficial  especially for parametric models:
 # https://www.geeksforgeeks.org/machine-learning/powertransformer-in-scikit-learn/
+#
+# We just need to be careful and transform it back when we get the result from the model at the end
+#
+
+# %%
 df_train["Price_transformed"], lambda_price = yeojohnson(df_train["Price"])
 
 
@@ -512,10 +516,8 @@ plt.scatter(df_train["Car_Age_transformed"], df_train["Price_transformed"], alph
 plt.show()
 print(correlation)
 
-# %%
-
 # %% [markdown]
-# Hmm this seems pretty good.
+# Hmm this seems pretty good. Will try adding it in the grid search later
 
 # %%
 correlation_features = [
@@ -528,7 +530,13 @@ corr = df_train[correlation_features].corr()
 corr.style.background_gradient(cmap="coolwarm")
 
 # %% [markdown]
-# ## I will check the distribution of all the numeric columns to see which would really need transformation
+# ----------------
+# All of the numeric columns by themeselves have low correlation with the price. Some feature engineering or 
+# power transformations could help this. Will do some more analysis below and see.
+
+# %% [markdown]
+# ---------------
+# Now I will check the distribution of all the numeric columns to see which would really need transformation.
 #
 
 # %%
@@ -623,6 +631,8 @@ from sklearn.preprocessing import (
 from sklearn.impute import SimpleImputer
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.compose import ColumnTransformer
+from sklearn.decomposition import TruncatedSVD
+from sklearn.feature_selection import SelectKBest, f_regression
 from datetime import datetime
 
 
@@ -665,7 +675,7 @@ class FrequencyEncoderTransformer(BaseEstimator, TransformerMixin):
 
 
 # %%
-preprocessing_pipeline = Pipeline(
+preprocessing_pipeline_A = Pipeline(
     [
         ("add_car_age", CarAgeTransformer(current_year=2025)),
         (
@@ -675,7 +685,7 @@ preprocessing_pipeline = Pipeline(
                     (
                         "model_location_encoder",
                         TargetEncoder(
-                            categories="auto", target_type="continuous", cv=5
+                            categories="auto", target_type="continuous", smooth="auto", cv=5
                         ),
                         ["Model", "Location"],
                     )
@@ -728,20 +738,6 @@ preprocessing_pipeline = Pipeline(
                         PowerTransformer(method="yeo-johnson"),
                         ["Capacity"],
                     ),
-                ],
-                remainder="passthrough",
-                verbose_feature_names_out=False,
-            ).set_output(transform="pandas"),
-        ),
-        (
-            "poly_features",
-            ColumnTransformer(
-                [
-                    (
-                        "poly",
-                        PolynomialFeatures(),
-                        ["Mileage", "Capacity"],
-                    )
                 ],
                 remainder="passthrough",
                 verbose_feature_names_out=False,
@@ -810,6 +806,152 @@ preprocessing_pipeline = Pipeline(
                 verbose_feature_names_out=False,
             ),
         ),
+        ("feature_selection", None),
+        ("scaler", None),
+    ]
+)
+
+# %%
+preprocessing_pipeline_B = Pipeline(
+    [
+        ("add_car_age", CarAgeTransformer(current_year=2025)),
+        (
+            "target_encode",
+            ColumnTransformer(
+                [
+                    (
+                        "model_location_encoder",
+                        TargetEncoder(
+                            categories="auto", target_type="continuous", smooth="auto", cv=5
+                        ),
+                        ["Model", "Location"],
+                    )
+                ],
+                remainder="passthrough",
+                verbose_feature_names_out=False,
+            ).set_output(transform="pandas"),
+        ),
+        ("frequency_encode", FrequencyEncoderTransformer(columns=["Seller_name"])),
+        (
+            "impute_body",
+            ColumnTransformer(
+                [
+                    (
+                        "body_imputer",
+                        SimpleImputer(strategy="constant", fill_value="unknown"),
+                        ["Body"],
+                    ),
+                ],
+                remainder="passthrough",
+                verbose_feature_names_out=False,
+            ).set_output(transform="pandas"),
+        ),
+        (
+            "ordinal_encoding",
+            ColumnTransformer(
+                [
+                    (
+                        "condition_encoder",
+                        OrdinalEncoder(
+                            categories=[["used", "reconditioned", "new"]],
+                            handle_unknown="use_encoded_value",
+                            unknown_value=-1,
+                        ),
+                        ["Condition"],
+                    ),
+                ],
+                remainder="passthrough",
+                verbose_feature_names_out=False,
+            ).set_output(transform="pandas"),
+        ),
+        (
+            "poly_features",
+            ColumnTransformer(
+                [
+                    (
+                        "poly",
+                        PolynomialFeatures(),
+                        ["Mileage", "Capacity"],
+                    )
+                ],
+                remainder="passthrough",
+                verbose_feature_names_out=False,
+            ).set_output(transform="pandas"),
+        ),
+        (
+            "power_transform",
+            ColumnTransformer(
+                [
+                    ("car_age_yj", PowerTransformer(method="yeo-johnson"), ["Car_Age"]),
+                ],
+                remainder="passthrough",
+                verbose_feature_names_out=False,
+            ).set_output(transform="pandas"),
+        ),
+        (
+            "one_hot_encoding",
+            ColumnTransformer(
+                [
+                    (
+                        "brand_encoder",
+                        OneHotEncoder(
+                            drop="first",
+                            sparse_output=False,
+                            handle_unknown="infrequent_if_exist",
+                            min_frequency=0.005,
+                        ),
+                        ["Brand"],
+                    ),
+                    (
+                        "fuel_encoder",
+                        OneHotEncoder(
+                            drop="first", sparse_output=False, handle_unknown="ignore"
+                        ),
+                        ["Fuel"],
+                    ),
+                    (
+                        "transmission_encoder",
+                        OneHotEncoder(
+                            drop="first", sparse_output=False, handle_unknown="ignore"
+                        ),
+                        ["Transmission"],
+                    ),
+                    (
+                        "body_encoder",
+                        OneHotEncoder(
+                            drop="first", sparse_output=False, handle_unknown="ignore"
+                        ),
+                        ["Body"],
+                    ),
+                ],
+                remainder="passthrough",
+                verbose_feature_names_out=False,
+            ).set_output(transform="pandas"),
+        ),
+        (
+            "text_features",
+            ColumnTransformer(
+                [
+                    (
+                        "description_bow",
+                        CountVectorizer(
+                            max_features=50, lowercase=True, stop_words="english"
+                        ),
+                        "Description",
+                    ),
+                    (
+                        "edition_bow",
+                        CountVectorizer(
+                            max_features=30, lowercase=True, stop_words="english"
+                        ),
+                        "Edition",
+                    ),
+                ],
+                remainder="passthrough",
+                verbose_feature_names_out=False,
+            ),
+        ),
+        ("feature_selection", None),
         ("scaler", None),
     ]
 )
@@ -821,9 +963,15 @@ preprocessing_pipeline = Pipeline(
 
 # %% [markdown]
 # # Model Selection
+#
+# After cleaning and preprocessing the data, we now need to find the best model for predicting car prices.
+#
+# All models will be tested with feature selection to find the optimal combination.
 
 # %%
 from sklearn.linear_model import LinearRegression, Ridge
+from sklearn.neighbors import KNeighborsRegressor
+from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
@@ -833,45 +981,11 @@ import warnings
 warnings.filterwarnings("ignore")
 
 # %%
-full_pipeline = Pipeline(
-    [
-        ("preprocessing", preprocessing_pipeline),
-        ("model", LinearRegression()),
-    ]
-)
-
-param_grid = {
-    "preprocessing__scaler": [StandardScaler(), RobustScaler(), None],
-    "preprocessing__text_features__description_bow__max_features": [100, 200],
-    "preprocessing__text_features__edition_bow__max_features": [50, 60],
-    "preprocessing__poly_features__poly__degree": [1, 2, 3],
-    "preprocessing__poly_features__poly__interaction_only": [False, True],
-    "model__alpha": [0.1, 0.5, 1],
-}
-
-# %%
 price_transformer = PowerTransformer(method="yeo-johnson")
 y_train_transformed = price_transformer.fit_transform(
     y_train.values.reshape(-1, 1)
 ).ravel()
 y_val_transformed = price_transformer.transform(y_val.values.reshape(-1, 1)).ravel()
-
-# %%
-grid_search = RandomizedSearchCV(
-    full_pipeline,
-    param_grid,
-    cv=2,
-    scoring="neg_mean_absolute_error",
-    n_jobs=-1,
-    verbose=2,
-)
-grid_search.fit(X_train, y_train_transformed)
-
-# %%
-print(f"Best MAE (CV): {-grid_search.best_score_:,.2f}")
-print(f"Best params: {grid_search.best_params_}")
-print(grid_search.best_estimator_.n_features_in_)
-
 
 # %%
 def check_fit(model, X_train, y_train, X_val, y_val, price_transformer):
@@ -890,61 +1004,292 @@ def check_fit(model, X_train, y_train, X_val, y_val, price_transformer):
 
     return train_mae, val_mae
 
+# %% [markdown]
+# ## Ridge Regression Experiments
+#
+# We start with Ridge regression because:
+# 1. It handles multicollinearity well
+# 2. Built-in regularization prevents overfitting
+# 3. Works well with power-transformed features
+#
+# ### Feature Selection Strategy
+#
+# After the initial experiments showed ~1.3M MAE, we added feature selection to:
+# - Reduce noise from irrelevant features
+# - Combat overfitting (fewer features = simpler model)
+# - Improve model generalization
+#
+# We test two approaches:
+# - **TruncatedSVD**: Dimensionality reduction that captures latent patterns (great for text features)
+#
+# ### Variant A: No Polynomial Features
+#
+# This is our clean baseline. We apply:
+# - Power transform to Car_Age, Mileage, Capacity
+# - Target encoding for Model/Location
+# - One-hot encoding for categorical features
+# - Bag-of-words for text features
+# - Optional feature selection (None, TruncatedSVD, or SelectKBest)
 
 # %%
-print(check_fit(grid_search, X_train, y_train, X_val, y_val, price_transformer))
+full_pipeline_A = Pipeline(
+    [
+        ("preprocessing", preprocessing_pipeline_A),
+        ("model", Ridge()),
+    ]
+)
+
+param_grid_A = {
+    "preprocessing__scaler": [StandardScaler(), RobustScaler(), None],
+    "preprocessing__text_features__description_bow__max_features": [50, 100],
+    "preprocessing__text_features__edition_bow__max_features": [30, 50],
+    "preprocessing__feature_selection": [
+        None,
+        TruncatedSVD(n_components=50),
+        TruncatedSVD(n_components=100),
+        SelectKBest(f_regression, k=50),
+        SelectKBest(f_regression, k=100),
+    ],
+    "model__alpha": [0.01, 0.1, 1, 10, 100],
+}
+
+# %%
+print("=" * 80)
+print("VARIANT A: No Polynomial Features (Baseline)")
+print("=" * 80)
+
+grid_search_A = GridSearchCV(
+    full_pipeline_A,
+    param_grid_A,
+    cv=5,
+    scoring="neg_mean_absolute_error",
+    n_jobs=-1,
+    verbose=2,
+)
+grid_search_A.fit(X_train, y_train_transformed)
+
+print(f"\nBest MAE (CV): {-grid_search_A.best_score_:,.2f}")
+print(f"Best params: {grid_search_A.best_params_}")
+
+train_mae_A, val_mae_A = check_fit(grid_search_A, X_train, y_train, X_val, y_val, price_transformer)
+print(f"\nTrain MAE: {train_mae_A:,.2f}")
+print(f"Validation MAE: {val_mae_A:,.2f}")
 
 # %% [markdown]
-# # Debugging
+# ### Variant B: Polynomial Features Before Power Transform
+#
+# This variant tests whether feature interactions help:
+# - Create polynomial features from RAW Mileage and Capacity first
+# - Then apply power transform to Car_Age (and polynomial features pass through)
+# - Everything else same as Variant A
+#
+# **Why this order?** Polynomials on raw features make sense (e.g., Mileage × Capacity).
+# Polynomials on power-transformed features create numerical chaos (belive me i tried and i got an errro worse than the dummy, around 5mil)
 
 # %%
-y_train.describe(), y_val.describe()
+full_pipeline_B = Pipeline(
+    [
+        ("preprocessing", preprocessing_pipeline_B),
+        ("model", Ridge()),
+    ]
+)
+
+param_grid_B = {
+    "preprocessing__scaler": [StandardScaler(), RobustScaler(), None],
+    "preprocessing__text_features__description_bow__max_features": [100,1000,5000],
+    "preprocessing__text_features__edition_bow__max_features": [100,1000,5000],
+    "preprocessing__poly_features__poly__degree": [1, 2],
+    "preprocessing__poly_features__poly__interaction_only": [False, True],
+    "preprocessing__feature_selection": [
+        None,
+        TruncatedSVD(n_components=100),
+        TruncatedSVD(n_components=300),
+    ],
+    "model__alpha": [0.01, 0.1, 1, 10, 100],
+}
 
 # %%
-y_val_pred_transformed = grid_search.predict(X_val)
-y_val_pred = price_transformer.inverse_transform(
-    y_val_pred_transformed.reshape(-1, 1)
-).ravel()
+print("\n" + "=" * 80)
+print("VARIANT B: Polynomial Features Before Power Transform")
+print("=" * 80)
 
-pd.DataFrame(
-    {
-        "actual": y_val.values,
-        "predicted": y_val_pred,
-        "error": np.abs(y_val.values - y_val_pred),
-    }
-).describe()
+grid_search_B = GridSearchCV(
+    full_pipeline_B,
+    param_grid_B,
+    cv=5,
+    scoring="neg_mean_absolute_error",
+    n_jobs=-1,
+    verbose=2,
+)
+grid_search_B.fit(X_train, y_train_transformed)
 
-# %%
-plt.figure(figsize=(10, 6))
-plt.scatter(y_val, y_val_pred, alpha=0.3)
-plt.plot([y_val.min(), y_val.max()], [y_val.min(), y_val.max()], "r--", lw=2)
-plt.xlabel("Actual Price")
-plt.ylabel("Predicted Price")
-plt.title("Actual vs Predicted")
-plt.show()
+print(f"\nBest MAE (CV): {-grid_search_B.best_score_:,.2f}")
+print(f"Best params: {grid_search_B.best_params_}")
 
-# %%
+train_mae_B, val_mae_B = check_fit(grid_search_B, X_train, y_train, X_val, y_val, price_transformer)
+print(f"\nTrain MAE: {train_mae_B:,.2f}")
+print(f"Validation MAE: {val_mae_B:,.2f}")
 
-# %%
-
-# %%
+# %% [markdown]
+# ### Ridge Results Comparison
+#
+# Let's see which variant performs better. We'll use the winner's preprocessing pipeline for the other models.
 
 # %%
+print("\n" + "=" * 80)
+print("COMPARISON SUMMARY")
+print("=" * 80)
+print(f"\nVariant A (No Polynomials):")
+print(f"  CV MAE: {-grid_search_A.best_score_:,.2f}")
+print(f"  Train MAE: {train_mae_A:,.2f}")
+print(f"  Val MAE: {val_mae_A:,.2f}")
+
+print(f"\nVariant B (Poly Before Transform):")
+print(f"  CV MAE: {-grid_search_B.best_score_:,.2f}")
+print(f"  Train MAE: {train_mae_B:,.2f}")
+print(f"  Val MAE: {val_mae_B:,.2f}")
+
+if val_mae_A < val_mae_B:
+    print(f"\n✓ Variant A is better by {val_mae_B - val_mae_A:,.2f}")
+    best_ridge_model = grid_search_A
+    best_preprocessing = preprocessing_pipeline_A
+else:
+    print(f"\n✓ Variant B is better by {val_mae_A - val_mae_B:,.2f}")
+    best_ridge_model = grid_search_B
+    best_preprocessing = preprocessing_pipeline_B
+
+# %% [markdown]
+# ## KNN Regressor
+#
+# K-Nearest Neighbors might capture non-linear price patterns that Ridge can't.
+#
+# We use RandomizedSearchCV with 50 iterations to keep it fast.
 
 # %%
+full_pipeline_knn = Pipeline(
+    [
+        ("preprocessing", best_preprocessing),
+        ("model", KNeighborsRegressor()),
+    ]
+)
+
+param_grid_knn = {
+    "preprocessing__scaler": [StandardScaler(), RobustScaler()],
+    "preprocessing__text_features__description_bow__max_features": [100, 500, 1000],
+    "preprocessing__text_features__edition_bow__max_features": [100, 500, 1000],
+    "preprocessing__feature_selection": [
+        TruncatedSVD(n_components=50),
+        TruncatedSVD(n_components=100),
+        TruncatedSVD(n_components=200),
+    ],
+    "model__n_neighbors": [3, 5, 10, 20],
+    "model__weights": ["uniform", "distance"],
+    "model__p": [1, 2],
+}
 
 # %%
+print("\n" + "=" * 80)
+print("KNN REGRESSOR")
+print("=" * 80)
+
+random_search_knn = RandomizedSearchCV(
+    full_pipeline_knn,
+    param_grid_knn,
+    n_iter=50,
+    cv=5,
+    scoring="neg_mean_absolute_error",
+    n_jobs=-1,
+    verbose=2,
+    random_state=42,
+)
+random_search_knn.fit(X_train, y_train_transformed)
+
+print(f"\nBest MAE (CV): {-random_search_knn.best_score_:,.2f}")
+print(f"Best params: {random_search_knn.best_params_}")
+
+train_mae_knn, val_mae_knn = check_fit(random_search_knn, X_train, y_train, X_val, y_val, price_transformer)
+print(f"\nTrain MAE: {train_mae_knn:,.2f}")
+print(f"Validation MAE: {val_mae_knn:,.2f}")
+
+# %% [markdown]
+# ## Random Forest
+#
+# Random Forest is our ensemble approach.
+# Random forests often work well "out of the box" but we'll still tune them.
 
 # %%
+full_pipeline_rf = Pipeline(
+    [
+        ("preprocessing", best_preprocessing),
+        ("model", RandomForestRegressor(random_state=42)),
+    ]
+)
+
+param_grid_rf = {
+    "preprocessing__scaler": [None, StandardScaler()],
+    "preprocessing__text_features__description_bow__max_features": [100, 500, 1000],
+    "preprocessing__text_features__edition_bow__max_features": [100, 500, 1000],
+    "preprocessing__feature_selection": [
+        None,
+        TruncatedSVD(n_components=100),
+        TruncatedSVD(n_components=200),
+    ],
+    "model__n_estimators": [50, 100, 200],
+    "model__max_depth": [5, 10, 20, None],
+    "model__min_samples_split": [2, 5, 10],
+    "model__min_samples_leaf": [1, 2, 4],
+    "model__max_features": ["sqrt", "log2", 0.5],
+}
 
 # %%
+print("\n" + "=" * 80)
+print("RANDOM FOREST")
+print("=" * 80)
+
+random_search_rf = RandomizedSearchCV(
+    full_pipeline_rf,
+    param_grid_rf,
+    n_iter=50,
+    cv=5,
+    scoring="neg_mean_absolute_error",
+    n_jobs=-1,
+    verbose=2,
+    random_state=42,
+)
+random_search_rf.fit(X_train, y_train_transformed)
+
+print(f"\nBest MAE (CV): {-random_search_rf.best_score_:,.2f}")
+print(f"Best params: {random_search_rf.best_params_}")
+
+train_mae_rf, val_mae_rf = check_fit(random_search_rf, X_train, y_train, X_val, y_val, price_transformer)
+print(f"\nTrain MAE: {train_mae_rf:,.2f}")
+print(f"Validation MAE: {val_mae_rf:,.2f}")
+
+# %% [markdown]
+# ## Final Model Comparison
+#
+# Now we compare all models side-by-side to select the winner.
 
 # %%
+print("\n" + "=" * 80)
+print("FINAL MODEL COMPARISON")
+print("=" * 80)
 
-# %%
+results = {
+    "Ridge (Variant A)": (grid_search_A, -grid_search_A.best_score_, train_mae_A, val_mae_A),
+    "Ridge (Variant B)": (grid_search_B, -grid_search_B.best_score_, train_mae_B, val_mae_B),
+    "KNN": (random_search_knn, -random_search_knn.best_score_, train_mae_knn, val_mae_knn),
+    "Random Forest": (random_search_rf, -random_search_rf.best_score_, train_mae_rf, val_mae_rf),
+}
 
-# %%
+for model_name, (model, cv_mae, train_mae, val_mae) in results.items():
+    print(f"\n{model_name}:")
+    print(f"  CV MAE: {cv_mae:,.2f}")
+    print(f"  Train MAE: {train_mae:,.2f}")
+    print(f"  Val MAE: {val_mae:,.2f}")
 
-# %%
+best_model_name = min(results.items(), key=lambda x: x[1][3])
+print(f"Best model: {best_model_name[0]} with Val MAE: {best_model_name[1][3]:,.2f}")
+best_model = best_model_name[1][0]
 
 # %%
