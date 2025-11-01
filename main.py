@@ -712,6 +712,109 @@ plt.show()
 # I might be able to impute it by just getting the most common edition
 
 # %% [markdown]
+# ## Feature Engineering Exploration
+
+# %%
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+#helper function for plotting copy pasted from chat gpt :D
+def plot_feature_to_target(df, feature, target="Price", bins=None, bin_labels=None):
+    data = df.copy()
+    
+
+    if bins is not None:
+        data[feature] = pd.cut(data[feature], bins=bins, labels=bin_labels, include_lowest=True)
+    
+
+    if pd.api.types.is_numeric_dtype(data[feature]) and bins is None:
+        plt.figure(figsize=(6, 4))
+        sns.scatterplot(x=data[feature], y=data[target], alpha=0.5)
+        plt.title(f"{feature} vs {target}")
+        plt.xlabel(feature)
+        plt.ylabel(target)
+        plt.grid(alpha=0.3)
+        plt.show()
+    else:
+        plt.figure(figsize=(6, 4))
+        sns.boxplot(x=data[feature], y=data[target])
+        plt.title(f"{feature} vs {target} (binned/categorical)")
+        plt.xlabel(feature)
+        plt.ylabel(target)
+        plt.grid(alpha=0.3)
+        plt.show()
+    
+    if pd.api.types.is_numeric_dtype(df[feature]) and df[feature].nunique() > 2:
+        corr = df[feature].corr(df[target])
+        print(f"Correlation between {feature} and {target}: {corr:.3f}")
+
+# %%
+df_train_copy["Mileage_per_Year"] = df_train_copy["Mileage"] / (df_train_copy["Car_Age"] + 1)
+df_train_copy["Mileage_per_Year"].corr(df_train_copy["Price"])
+
+# %% [markdown]
+# Pretty bad correlation but it could be non linear. Let me plot it
+
+# %%
+plt.scatter(df_train_copy["Mileage_per_Year"], df_train_copy["Price"], alpha=0.3)
+plt.xlabel("Mileage per Year")
+plt.ylabel("Price")
+plt.show()
+
+# %% [markdown]
+# Non linear relationship. Although linear regression will not be able to get it, random forest or knn might be able to pick it up.
+
+# %%
+
+# %%
+from collections import Counter
+import re
+edition_text = " ".join(df_train_copy["Edition"].dropna().str.lower())
+tokens = re.findall(r"\b[a-z0-9]+\b", edition_text)
+common_words = Counter(tokens).most_common(20)
+for word, count in common_words:
+    print(f"{word}: {count}")
+
+
+# %%
+
+
+edition_lower = df_train_copy["Edition"].str.lower().fillna("")
+
+
+edition_groups = {
+    "sporty": ["sport", "gt", "gti", "rs", "amg", "turbo"],
+    "luxury": ["premium", "superior", "limited", "option"],
+    "base": ["grade", "s", "ex", "g"],
+    "utility": ["wagon", "diesel", "auto"],
+}
+
+
+def classify_edition(text):
+    for group, keywords in edition_groups.items():
+        if any(k in text for k in keywords):
+            return group
+    return "other"
+
+df_train_copy["Edition_Category"] = edition_lower.apply(classify_edition)
+
+
+edition_price_means = df_train_copy.groupby("Edition_Category")["Price"].mean().sort_values(ascending=False)
+print(edition_price_means)
+
+
+edition_price_means.plot(kind="bar", figsize=(8, 4), color="teal", edgecolor="black")
+plt.title("Average Price by Edition Category")
+plt.ylabel("Mean Price")
+plt.tight_layout()
+plt.show()
+
+
+# %% [markdown]
+# This seems pretty good actually!
+
+# %% [markdown]
 # ## Rare Category Analysis
 
 # %%
@@ -1270,32 +1373,37 @@ print(f"  Val MAE: {val_mae_B:,.2f}")
 #
 # We use RandomizedSearchCV with 50 iterations to keep it fast.
 
+# %% [markdown]
+# After running some experiments my knn was heavily overfitting 
+# 300 error and 1.200 validation.
+#
+
 # %%
 full_pipeline_knn = Pipeline(
     [
-        ("preprocessing", best_preprocessing),
+        ("preprocessing", preprocessing_pipeline_B),
         ("model", KNeighborsRegressor()),
     ]
 )
 
 param_grid_knn = {
-    "preprocessing__scaler": [StandardScaler(), RobustScaler()],
-    "preprocessing__text_features__description_bow__max_features": [100, 500, 1000],
-    "preprocessing__text_features__edition_bow__max_features": [100, 500, 1000],
+    "preprocessing__scaler": [StandardScaler(), RobustScaler(),None],
+    "preprocessing__text_features__description_bow__max_features": [100, 500],
+    "preprocessing__text_features__edition_bow__max_features": [50, 100],
     "preprocessing__feature_selection": [
+        TruncatedSVD(n_components=20),
         TruncatedSVD(n_components=50),
-        TruncatedSVD(n_components=100),
-        TruncatedSVD(n_components=200),
     ],
-    "model__n_neighbors": [3, 5, 10, 20],
-    "model__weights": ["uniform", "distance"],
-    "model__p": [1, 2],
+    "model__n_neighbors": [20, 30, 40, 50],
+    "model__weights": ["uniform"],  # 'distance' can overfit in small data
+    "model__p": [1,2]
 }
 
+
 # %%
-print("\n" + "=" * 80)
+
 print("KNN REGRESSOR")
-print("=" * 80)
+
 
 random_search_knn = RandomizedSearchCV(
     full_pipeline_knn,
@@ -1309,12 +1417,22 @@ random_search_knn = RandomizedSearchCV(
 )
 random_search_knn.fit(X_train, y_train_transformed)
 
-print(f"\nBest MAE (CV): {-random_search_knn.best_score_:,.2f}")
+# %%
+print(f"Best MAE (CV): {-random_search_knn.best_score_:,.2f}")
 print(f"Best params: {random_search_knn.best_params_}")
 
 train_mae_knn, val_mae_knn = check_fit(random_search_knn, X_train, y_train, X_val, y_val, price_transformer)
-print(f"\nTrain MAE: {train_mae_knn:,.2f}")
+print(f"Train MAE: {train_mae_knn:,.2f}")
 print(f"Validation MAE: {val_mae_knn:,.2f}")
+
+# %% [markdown]
+# Terrible results but this was expected as KNN doesn't perform well with a lot of features.
+# ```
+# Best MAE (CV): 0.28
+# Best params: {'preprocessing__text_features__edition_bow__max_features': 50, 'preprocessing__text_features__description_bow__max_features': 500, 'preprocessing__scaler': StandardScaler(), 'preprocessing__feature_selection': TruncatedSVD(n_components=20), 'model__weights': 'uniform', 'model__p': 1, 'model__n_neighbors': 40}
+# Train MAE: 1,819,131.15
+# Validation MAE: 1,828,531.55
+# ```
 
 # %% [markdown]
 # ## Random Forest
@@ -1325,31 +1443,39 @@ print(f"Validation MAE: {val_mae_knn:,.2f}")
 # %%
 full_pipeline_rf = Pipeline(
     [
-        ("preprocessing", best_preprocessing),
-        ("model", RandomForestRegressor(random_state=42)),
+        ("preprocessing", preprocessing_pipeline_B),
+        ("model", RandomForestRegressor(random_state=rngs)),
     ]
 )
 
+# param_grid_rf = {
+#     "preprocessing__scaler": [None],
+#     "preprocessing__text_features__description_bow__max_features": [500, 1000, 3000, 5000],
+#     "preprocessing__text_features__edition_bow__max_features": [100, 500, 1000],
+#     "preprocessing__feature_selection": [None],
+#     "model__n_estimators": [50, 100, 200],
+#     "model__max_depth": [5, 10, 20, None],
+#     "model__min_samples_split": [2, 5, 10],
+#     "model__min_samples_leaf": [1, 2, 4],
+#     "model__max_features": ["sqrt", "log2", 0.5],
+# }
+
 param_grid_rf = {
-    "preprocessing__scaler": [None, StandardScaler()],
-    "preprocessing__text_features__description_bow__max_features": [100, 500, 1000],
-    "preprocessing__text_features__edition_bow__max_features": [100, 500, 1000],
-    "preprocessing__feature_selection": [
-        None,
-        TruncatedSVD(n_components=100),
-        TruncatedSVD(n_components=200),
-    ],
-    "model__n_estimators": [50, 100, 200],
-    "model__max_depth": [5, 10, 20, None],
-    "model__min_samples_split": [2, 5, 10],
-    "model__min_samples_leaf": [1, 2, 4],
-    "model__max_features": ["sqrt", "log2", 0.5],
+    "preprocessing__text_features__description_bow__max_features": [1000],
+    "preprocessing__text_features__edition_bow__max_features": [500],
+    "preprocessing__scaler": [None],
+    "preprocessing__feature_selection": [None],
+    "model__n_estimators": [200],
+    "model__max_depth": [20],
+    "model__min_samples_split": [5],
+    "model__min_samples_leaf": [2],
+    "model__max_features": [0.5],
 }
 
 # %%
-print("\n" + "=" * 80)
+
 print("RANDOM FOREST")
-print("=" * 80)
+
 
 random_search_rf = RandomizedSearchCV(
     full_pipeline_rf,
@@ -1363,12 +1489,25 @@ random_search_rf = RandomizedSearchCV(
 )
 random_search_rf.fit(X_train, y_train_transformed)
 
+
+
+# %%
 print(f"\nBest MAE (CV): {-random_search_rf.best_score_:,.2f}")
 print(f"Best params: {random_search_rf.best_params_}")
 
 train_mae_rf, val_mae_rf = check_fit(random_search_rf, X_train, y_train, X_val, y_val, price_transformer)
 print(f"\nTrain MAE: {train_mae_rf:,.2f}")
 print(f"Validation MAE: {val_mae_rf:,.2f}")
+
+# %% [markdown]
+# Best params:
+# ```
+# Best MAE (CV): 0.12
+# Best params: {'preprocessing__text_features__edition_bow__max_features': 500, 'preprocessing__text_features__description_bow__max_features': 1000, 'preprocessing__scaler': None, 'preprocessing__feature_selection': None, 'model__n_estimators': 200, 'model__min_samples_split': 5, 'model__min_samples_leaf': 2, 'model__max_features': 0.5, 'model__max_depth': 20}
+#
+# Train MAE: 392,733.11
+# Validation MAE: 738,201.77
+# ```
 
 # %% [markdown]
 # ## Final Model Comparison
@@ -1396,5 +1535,15 @@ for model_name, (model, cv_mae, train_mae, val_mae) in results.items():
 best_model_name = min(results.items(), key=lambda x: x[1][3])
 print(f"Best model: {best_model_name[0]} with Val MAE: {best_model_name[1][3]:,.2f}")
 best_model = best_model_name[1][0]
+
+# %% [markdown]
+# # Get the best model and test it
+
+# %%
+test_mae_rf, _ = check_fit(random_search_rf,
+  X_test, y_test, X_test, y_test,
+  price_transformer)
+print(f"Test MAE: {test_mae_rf:,.2f}")
+
 
 # %%
