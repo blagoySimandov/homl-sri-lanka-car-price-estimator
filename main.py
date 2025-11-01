@@ -411,6 +411,124 @@ print(f"test set size: {len(df_test)}")
 import matplotlib.pyplot as plt
 import numpy as np
 
+def plot_distributions(df, columns, transformed=False, layout='auto'):
+    n_cols = len(columns)
+
+    if layout == 'auto':
+        if n_cols <= 4:
+            rows, cols = 2, 2
+        else:
+            rows, cols = n_cols, 1
+    else:
+        rows, cols = layout
+
+    if rows == 2 and cols == 2:
+        figsize = (10, 8)
+    else:
+        figsize = (8, 4 * rows)
+
+    colors = ["steelblue", "seagreen", "indianred", "darkorange", "mediumpurple"] * (n_cols // 5 + 1)
+
+    plt.figure(figsize=figsize)
+
+    for i, (col, color) in enumerate(zip(columns, colors), 1):
+        plt.subplot(rows, cols, i)
+        plt.hist(df[col], bins=30, color=color, edgecolor="black", alpha=0.7)
+        title = f"{col} Distribution" if not transformed else f"{col} Distribution"
+        plt.title(title, fontsize=12, fontweight="bold")
+        plt.xlabel(col, fontsize=10)
+        plt.ylabel("Frequency", fontsize=10)
+        plt.grid(True, linestyle="--", alpha=0.5)
+
+    plt.tight_layout()
+    plt.show()
+
+def plot_category_vs_target(df, category_col, target_col="Price", top_n=10, plot_type='boxplot', orientation='horizontal', figsize=(12, 6), color='steelblue', title=None):
+    top_categories = df[category_col].value_counts().head(top_n).index
+    df_filtered = df[df[category_col].isin(top_categories)]
+
+    fig, ax = plt.subplots(figsize=figsize)
+
+    if plot_type == 'boxplot':
+        category_data = [
+            df_filtered[df_filtered[category_col] == cat][target_col]
+            for cat in top_categories
+        ]
+
+        if orientation == 'horizontal':
+            ax.boxplot(category_data, tick_labels=top_categories, vert=False)
+            ax.set_xlabel(target_col)
+            ax.set_ylabel(category_col)
+        else:
+            ax.boxplot(category_data, tick_labels=top_categories, vert=True)
+            ax.set_xlabel(category_col)
+            ax.set_ylabel(target_col)
+
+    elif plot_type == 'bar':
+        means = df_filtered.groupby(category_col)[target_col].mean().sort_values(ascending=False)
+
+        if orientation == 'horizontal':
+            ax.barh(means.index, means.values, color=color)
+            ax.set_xlabel(f"Mean {target_col}")
+            ax.set_ylabel(category_col)
+        else:
+            ax.bar(means.index, means.values, color=color)
+            ax.set_xlabel(category_col)
+            ax.set_ylabel(f"Mean {target_col}")
+
+    if title is None:
+        title = f"{target_col} Distribution by Top {top_n} {category_col}"
+    ax.set_title(title)
+
+    plt.tight_layout()
+    plt.show()
+
+def plot_scatter_analysis(df, x_cols, y_col=None, show_correlation=False, subplot_layout='vertical'):
+    if isinstance(x_cols, str):
+        x_cols = [x_cols]
+
+    n_cols = len(x_cols)
+
+    if subplot_layout == 'vertical':
+        rows, cols = n_cols, 1
+        figsize = (10, 8) if n_cols <= 3 else (10, 4 * n_cols)
+    else:
+        rows = int(np.ceil(n_cols / 2))
+        cols = 2 if n_cols > 1 else 1
+        figsize = (10, 8)
+
+    if n_cols == 1:
+        figsize = (14, 6)
+
+    plt.figure(figsize=figsize)
+
+    for i, col in enumerate(x_cols, 1):
+        if n_cols > 1:
+            plt.subplot(rows, cols, i)
+
+        if y_col is None:
+            plt.scatter(df.index, df[col], alpha=0.6)
+            plt.xlabel("Index")
+            plt.ylabel(col)
+            plt.title(col)
+        else:
+            plt.scatter(df[col], df[y_col], alpha=0.3)
+            plt.xlabel(col)
+            plt.ylabel(y_col)
+            if n_cols == 1:
+                plt.title(f"{y_col} vs {col}")
+            else:
+                plt.title(col)
+
+            if show_correlation:
+                correlation = df[col].corr(df[y_col])
+                print(f"Correlation between {col} and {y_col}: {correlation:.3f}")
+
+        plt.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.show()
+
 # %% [markdown]
 # Using a copy to avoid polluting the training dataframe during EDA experiments
 
@@ -434,19 +552,7 @@ skew(df_cleaned["Mileage"]), skew(df_cleaned["Price"])
 
 # %%
 cols = ["Mileage", "Capacity", "Price"]
-
-plt.figure(figsize=(10, 8))
-
-for i, col in enumerate(cols, 1):
-    plt.subplot(3, 1, i)
-    plt.scatter(df_train_copy.index, df_train_copy[col], alpha=0.6)
-    plt.title(col)
-    plt.xlabel("Index")
-    plt.ylabel(col)
-    plt.grid(True)
-
-plt.tight_layout()
-plt.show()
+plot_scatter_analysis(df_train_copy, cols)
 
 
 # %%
@@ -482,17 +588,7 @@ df_train_copy.sort_values("Capacity",ascending=False).head()
 #
 
 # %%
-top_brands = df_train_copy["Brand"].value_counts().head(10).index
-df_brand_price = df_train_copy[df_train_copy["Brand"].isin(top_brands)]
-
-brand_data = [df_brand_price[df_brand_price["Brand"] == brand]["Price"] for brand in top_brands]
-
-fig, ax = plt.subplots(figsize=(12, 6))
-ax.boxplot(brand_data, tick_labels=top_brands, vert=False)
-ax.set_xlabel("Price")
-ax.set_title("Price Distribution by Top 10 Brands")
-plt.tight_layout()
-plt.show()
+plot_category_vs_target(df_train_copy, "Brand", "Price", top_n=10)
 
 # %% [markdown]
 # Seems like a few brands are pretty representative (given the brand you can get a  a good price) this would be suzuki, nissan and honda.
@@ -500,17 +596,7 @@ plt.show()
 #
 
 # %%
-top_models = df_train_copy["Model"].value_counts().head(15).index
-df_model_price = df_train_copy[df_train_copy["Model"].isin(top_models)]
-
-model_data = [df_model_price[df_model_price["Model"] == model]["Price"] for model in top_models]
-
-fig, ax = plt.subplots(figsize=(12, 8))
-ax.boxplot(model_data, tick_labels=top_models, vert=False)
-ax.set_xlabel("Price")
-ax.set_title("Price Distribution by Top 15 Models")
-plt.tight_layout()
-plt.show()
+plot_category_vs_target(df_train_copy, "Model", "Price", top_n=15, figsize=(12, 8))
 
 # %% [markdown]
 # Some do seem kinda representative but nothing really strikes me here.
@@ -522,14 +608,7 @@ plt.show()
 current_year = 2025
 df_train_copy["Car_Age"] = current_year - df_train_copy["Year"]
 
-plt.figure(figsize=(14, 6))
-plt.scatter(df_train_copy["Car_Age"], df_train_copy["Price"], alpha=0.3)
-plt.xlabel("Car Age (years)")
-plt.ylabel("Price (Rs)")
-plt.title("Price vs Car Age")
-plt.grid(True, alpha=0.3)
-plt.tight_layout()
-plt.show()
+plot_scatter_analysis(df_train_copy, "Car_Age", y_col="Price")
 
 # %% [markdown]
 # Seems like a logarithmic relationship. With a really heavy tail. Tranforming it with a power tranformation will help for the parametric models like linear regression and ridge.
@@ -542,10 +621,7 @@ df_train_copy["Car_Age_transformed"] = yeojohnson(df_train_copy["Car_Age"])[0]
 
 # %%
 
-correlation = df_train_copy["Car_Age_transformed"].corr(df_train_copy["Price"])
-plt.scatter(df_train_copy["Car_Age_transformed"], df_train_copy["Price"], alpha=0.3)
-plt.show()
-print(correlation)
+plot_scatter_analysis(df_train_copy, "Car_Age_transformed", y_col="Price", show_correlation=True)
 
 # %% [markdown]
 # Better. Not the best
@@ -563,10 +639,7 @@ df_train_copy["Price_transformed"], lambda_price = yeojohnson(df_train_copy["Pri
 
 # %%
 
-correlation = df_train_copy["Car_Age_transformed"].corr(df_train_copy["Price_transformed"])
-plt.scatter(df_train_copy["Car_Age_transformed"], df_train_copy["Price_transformed"], alpha=0.3)
-plt.show()
-print(correlation)
+plot_scatter_analysis(df_train_copy, "Car_Age_transformed", y_col="Price_transformed", show_correlation=True)
 
 # %% [markdown]
 # Hmm this seems pretty good. Will try adding it in the grid search later
@@ -593,19 +666,7 @@ corr.style.background_gradient(cmap="coolwarm")
 
 # %%
 correlation_features = ["Price", "Year", "Mileage", "Capacity"]
-
-plt.figure(figsize=(10, 8))
-
-for i, col in enumerate(correlation_features, 1):
-    plt.subplot(2, 2, i)
-    plt.hist(df_train_copy[col], bins=30, color="skyblue", edgecolor="black", alpha=0.7)
-    plt.title(f"{col} Distribution")
-    plt.xlabel(col)
-    plt.ylabel("Frequency")
-    plt.grid(True)
-
-plt.tight_layout()
-plt.show()
+plot_distributions(df_train_copy, correlation_features)
 
 
 # %% [markdown]
@@ -624,8 +685,6 @@ corr.style.background_gradient(cmap="coolwarm")
 # Correlations improve moderately after power transformations
 
 # %%
-import matplotlib.pyplot as plt
-
 correlation_features = [
     "Price_transformed",
     "Car_Age_transformed",
@@ -633,21 +692,7 @@ correlation_features = [
     "Capacity_transformed",
     "Year_transformed",
 ]
-
-plt.figure(figsize=(8, 15))  # taller figure for 5 stacked plots
-
-colors = ["steelblue", "seagreen", "indianred", "darkorange", "mediumpurple"]
-
-for i, (col, color) in enumerate(zip(correlation_features, colors), 1):
-    plt.subplot(len(correlation_features), 1, i)
-    plt.hist(df_train_copy[col], bins=30, color=color, edgecolor="black", alpha=0.7)
-    plt.title(f"{col} Distribution", fontsize=12, fontweight="bold")
-    plt.xlabel(col, fontsize=10)
-    plt.ylabel("Frequency", fontsize=10)
-    plt.grid(True, linestyle="--", alpha=0.5)
-
-plt.tight_layout()
-plt.show()
+plot_distributions(df_train_copy, correlation_features, transformed=True)
 
 
 # %% [markdown]
@@ -715,41 +760,6 @@ plt.show()
 # ## Feature Engineering Exploration
 
 # %%
-import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
-
-#helper function for plotting copy pasted from chat gpt :D
-def plot_feature_to_target(df, feature, target="Price", bins=None, bin_labels=None):
-    data = df.copy()
-    
-
-    if bins is not None:
-        data[feature] = pd.cut(data[feature], bins=bins, labels=bin_labels, include_lowest=True)
-    
-
-    if pd.api.types.is_numeric_dtype(data[feature]) and bins is None:
-        plt.figure(figsize=(6, 4))
-        sns.scatterplot(x=data[feature], y=data[target], alpha=0.5)
-        plt.title(f"{feature} vs {target}")
-        plt.xlabel(feature)
-        plt.ylabel(target)
-        plt.grid(alpha=0.3)
-        plt.show()
-    else:
-        plt.figure(figsize=(6, 4))
-        sns.boxplot(x=data[feature], y=data[target])
-        plt.title(f"{feature} vs {target} (binned/categorical)")
-        plt.xlabel(feature)
-        plt.ylabel(target)
-        plt.grid(alpha=0.3)
-        plt.show()
-    
-    if pd.api.types.is_numeric_dtype(df[feature]) and df[feature].nunique() > 2:
-        corr = df[feature].corr(df[target])
-        print(f"Correlation between {feature} and {target}: {corr:.3f}")
-
-# %%
 df_train_copy["Mileage_per_Year"] = df_train_copy["Mileage"] / (df_train_copy["Car_Age"] + 1)
 df_train_copy["Mileage_per_Year"].corr(df_train_copy["Price"])
 
@@ -757,10 +767,7 @@ df_train_copy["Mileage_per_Year"].corr(df_train_copy["Price"])
 # Pretty bad correlation but it could be non linear. Let me plot it
 
 # %%
-plt.scatter(df_train_copy["Mileage_per_Year"], df_train_copy["Price"], alpha=0.3)
-plt.xlabel("Mileage per Year")
-plt.ylabel("Price")
-plt.show()
+plot_scatter_analysis(df_train_copy, "Mileage_per_Year", y_col="Price")
 
 # %% [markdown]
 # Non linear relationship. Although linear regression will not be able to get it, random forest or knn might be able to pick it up.
@@ -803,12 +810,7 @@ df_train_copy["Edition_Category"] = edition_lower.apply(classify_edition)
 edition_price_means = df_train_copy.groupby("Edition_Category")["Price"].mean().sort_values(ascending=False)
 print(edition_price_means)
 
-
-edition_price_means.plot(kind="bar", figsize=(8, 4), color="teal", edgecolor="black")
-plt.title("Average Price by Edition Category")
-plt.ylabel("Mean Price")
-plt.tight_layout()
-plt.show()
+plot_category_vs_target(df_train_copy, "Edition_Category", "Price", top_n=len(df_train_copy["Edition_Category"].unique()), plot_type='bar', orientation='vertical', figsize=(8, 4), color='teal')
 
 
 # %% [markdown]
