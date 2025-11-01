@@ -543,12 +543,12 @@ from scipy.stats import skew
 
 # https://www.geeksforgeeks.org/python/scipy-stats-skew-python/
 # Highly skeweed values (over 1) need to be transformed.
-skew(df_cleaned["Mileage"]), skew(df_cleaned["Price"])
+skew(df_train_copy["Mileage"]), skew(df_train_copy["Price"])
 
 # %% [markdown]
 # --------------------------------------
 # Let's take a look at some outliers.
-# Note: This analysis is done on df_train_copy in EDA. The actual clipping is applied earlier in the data cleaning pipeline.
+# Note: Although this analysis is done on df_train_copy in EDA. The actual clipping is applied earlier in the data cleaning pipeline.
 
 # %%
 cols = ["Mileage", "Capacity", "Price"]
@@ -773,13 +773,11 @@ plot_scatter_analysis(df_train_copy, "Mileage_per_Year", y_col="Price")
 # Non linear relationship. Although linear regression will not be able to get it, random forest or knn might be able to pick it up.
 
 # %%
-
-# %%
 from collections import Counter
 import re
 edition_text = " ".join(df_train_copy["Edition"].dropna().str.lower())
 tokens = re.findall(r"\b[a-z0-9]+\b", edition_text)
-common_words = Counter(tokens).most_common(20)
+common_words = Counter(tokens).most_common(50)
 for word, count in common_words:
     print(f"{word}: {count}")
 
@@ -814,7 +812,25 @@ plot_category_vs_target(df_train_copy, "Edition_Category", "Price", top_n=len(df
 
 
 # %% [markdown]
-# This seems pretty good actually!
+# This seems pretty good actually! But we do need to make it a bit more sophisticated as we don't want to just hardcode the words.
+# What we can do is try and 'cluster' words from the edition column into groups. This way we should be able to do what we did above but in a more general way.
+#
+# https://scikit-learn.org/stable/auto_examples/text/plot_document_clustering.html
+
+# %%
+cluster_sizes = df_train_copy["Edition_Category"].value_counts()
+print(cluster_sizes)
+
+
+# %% [markdown]
+# I'm concerned that this is not good enough and there are 
+# 1. too many things falling into t he other category 
+# 2. too litle things falling into sporty luxurt and utility
+#
+# And the difference in the mean price is just because of the small amount of data for each of the categories
+
+# %% [markdown]
+# What if we train a model to do regression using the text
 
 # %% [markdown]
 # ## Rare Category Analysis
@@ -850,7 +866,7 @@ for col in high_cardinality_cols:
 # ----------------------------------
 
 # %%
-df_cleaned["Body"].value_counts()
+df_train["Body"].value_counts()
 
 # %% [markdown]
 # # Preprocessing
@@ -942,177 +958,580 @@ class FrequencyEncoderTransformer(BaseEstimator, TransformerMixin):
 
 
 # %% [markdown]
-# --------------
-# Since i have two different pipelines for the sake of code quality I have created a common steps part
-# which will then get combined to each of the two different once
-# Reasonsing behind the differnec in the pipelines will be given during model selection below
+# Preprocessing Pipelines:
 #
-# ----------------
+# Ridge Variant A: Simple power transforms (for comparison)
+# Ridge Variant B: Polynomial + power transforms (best for Ridge based on experiments)
+# KNN: Minimal transforms + aggressive dimensionality reduction (knn really doesn't seem to like a lot of features)
+# Random Forest: Raw features (trees handle non-linearity naturally)
 
 # %%
-def create_common_steps_start():
-    return [
-        ("add_car_age", CarAgeTransformer(current_year=2025)),
-        (
-            "target_encode",
-            ColumnTransformer(
-                [
-                    (
-                        "model_location_encoder",
-                        TargetEncoder(categories="auto", target_type="continuous", smooth="auto", cv=5),
-                        ["Model", "Location"],
-                    )
-                ],
-                remainder="passthrough",
-                verbose_feature_names_out=False,
-            ).set_output(transform="pandas"),
+preprocessing_pipeline_ridge_A = Pipeline([
+    ("add_car_age", CarAgeTransformer(current_year=2025)),
+    (
+        "target_encode",
+        ColumnTransformer(
+            [
+                (
+                    "model_location_encoder",
+                    TargetEncoder(categories="auto", target_type="continuous", smooth="auto", cv=5),
+                    ["Model", "Location"],
+                )
+            ],
+            remainder="passthrough",
+            verbose_feature_names_out=False,
+        ).set_output(transform="pandas"),
+    ),
+    ("frequency_encode", FrequencyEncoderTransformer(columns=["Seller_name"])),
+    (
+        "impute_missing",
+        ColumnTransformer(
+            [
+                (
+                    "body_edition_imputer",
+                    SimpleImputer(strategy="constant", fill_value="unknown"),
+                    ["Body", "Edition"],
+                ),
+            ],
+            remainder="passthrough",
+            verbose_feature_names_out=False,
+        ).set_output(transform="pandas"),
+    ),
+    (
+        "ordinal_encoding",
+        ColumnTransformer(
+            [
+                (
+                    "condition_encoder",
+                    OrdinalEncoder(
+                        categories=[["used", "reconditioned", "new"]],
+                        handle_unknown="use_encoded_value",
+                        unknown_value=-1,
+                    ),
+                    ["Condition"],
+                ),
+            ],
+            remainder="passthrough",
+            verbose_feature_names_out=False,
+        ).set_output(transform="pandas"),
+    ),
+    (
+        "power_transform",
+        ColumnTransformer(
+            [
+                ("car_age_yj", PowerTransformer(method="yeo-johnson"), ["Car_Age"]),
+                ("mileage_yj", PowerTransformer(method="yeo-johnson"), ["Mileage"]),
+                ("capacity_yj", PowerTransformer(method="yeo-johnson"), ["Capacity"]),
+                ("year_yj", PowerTransformer(method="yeo-johnson"), ["Year"]),
+            ],
+            remainder="passthrough",
+            verbose_feature_names_out=False,
+        ).set_output(transform="pandas"),
+    ),
+    (
+        "one_hot_encoding",
+        ColumnTransformer(
+            [
+                (
+                    "brand_encoder",
+                    OneHotEncoder(
+                        drop="first",
+                        sparse_output=False,
+                        handle_unknown="infrequent_if_exist",
+                        min_frequency=0.005,
+                    ),
+                    ["Brand"],
+                ),
+                (
+                    "fuel_encoder",
+                    OneHotEncoder(drop="first", sparse_output=False, handle_unknown="ignore"),
+                    ["Fuel"],
+                ),
+                (
+                    "transmission_encoder",
+                    OneHotEncoder(drop="first", sparse_output=False, handle_unknown="ignore"),
+                    ["Transmission"],
+                ),
+                (
+                    "body_encoder",
+                    OneHotEncoder(drop="first", sparse_output=False, handle_unknown="ignore"),
+                    ["Body"],
+                ),
+            ],
+            remainder="passthrough",
+            verbose_feature_names_out=False,
+        ).set_output(transform="pandas"),
+    ),
+    (
+        "text_features",
+        ColumnTransformer(
+            [
+                (
+                    "description_bow",
+                    CountVectorizer(max_features=None, lowercase=True, stop_words="english"),
+                    "Description",
+                ),
+                (
+                    "edition_bow",
+                    CountVectorizer(max_features=None, lowercase=True, stop_words="english"),
+                    "Edition",
+                ),
+            ],
+            remainder="passthrough",
+            verbose_feature_names_out=False,
         ),
-        ("frequency_encode", FrequencyEncoderTransformer(columns=["Seller_name"])),
-        (
-            "impute_missing",
-            ColumnTransformer(
-                [
-                    (
-                        "body_edition_imputer",
-                        SimpleImputer(strategy="constant", fill_value="unknown"),
-                        ["Body", "Edition"],
-                    ),
-                ],
-                remainder="passthrough",
-                verbose_feature_names_out=False,
-            ).set_output(transform="pandas"),
-        ),
-        (
-            "ordinal_encoding",
-            ColumnTransformer(
-                [
-                    (
-                        "condition_encoder",
-                        OrdinalEncoder(
-                            categories=[["used", "reconditioned", "new"]],
-                            handle_unknown="use_encoded_value",
-                            unknown_value=-1,
-                        ),
-                        ["Condition"],
-                    ),
-                ],
-                remainder="passthrough",
-                verbose_feature_names_out=False,
-            ).set_output(transform="pandas"),
-        ),
-    ]
-
-
-def create_common_steps_end():
-    return [
-        (
-            "one_hot_encoding",
-            ColumnTransformer(
-                [
-                    (
-                        "brand_encoder",
-                        OneHotEncoder(
-                            drop="first",
-                            sparse_output=False,
-                            handle_unknown="infrequent_if_exist",
-                            min_frequency=0.005,
-                        ),
-                        ["Brand"],
-                    ),
-                    (
-                        "fuel_encoder",
-                        OneHotEncoder(drop="first", sparse_output=False, handle_unknown="ignore"),
-                        ["Fuel"],
-                    ),
-                    (
-                        "transmission_encoder",
-                        OneHotEncoder(drop="first", sparse_output=False, handle_unknown="ignore"),
-                        ["Transmission"],
-                    ),
-                    (
-                        "body_encoder",
-                        OneHotEncoder(drop="first", sparse_output=False, handle_unknown="ignore"),
-                        ["Body"],
-                    ),
-                ],
-                remainder="passthrough",
-                verbose_feature_names_out=False,
-            ).set_output(transform="pandas"),
-        ),
-        (
-            "text_features",
-            ColumnTransformer(
-                [
-                    (
-                        "description_bow",
-                        CountVectorizer(max_features=50, lowercase=True, stop_words="english"),
-                        "Description",
-                    ),
-                    (
-                        "edition_bow",
-                        CountVectorizer(max_features=30, lowercase=True, stop_words="english"),
-                        "Edition",
-                    ),
-                ],
-                remainder="passthrough",
-                verbose_feature_names_out=False,
-            ),
-        ),
-        ("feature_selection", None),
-        ("scaler", None),
-    ]
-
-# %% [markdown]
-# Pipeline A: Power transforms Car_Age, Mileage, Capacity
-# Pipeline B: Polynomial features on Mileage+Capacity + Year, power transform only Car_Age
-
-# %%
-preprocessing_pipeline_A = Pipeline(
-    create_common_steps_start()
-    + [
-        (
-            "power_transform",
-            ColumnTransformer(
-                [
-                    ("car_age_yj", PowerTransformer(method="yeo-johnson"), ["Car_Age"]),
-                    ("mileage_yj", PowerTransformer(method="yeo-johnson"), ["Mileage"]),
-                    ("capacity_yj", PowerTransformer(method="yeo-johnson"), ["Capacity"]),
-                    ("year_yj", PowerTransformer(method="yeo-johnson"), ["Year"]),#Im keeping year even tho it correlates with car age we can always remove it in feature selection
-                ],
-                remainder="passthrough",
-                verbose_feature_names_out=False,
-            ).set_output(transform="pandas"),
-        ),
-    ]
-    + create_common_steps_end()
-)
+    ),
+    ("feature_selection", None),
+    ("scaler", None),
+])
 
 # %%
-preprocessing_pipeline_B = Pipeline(
-    create_common_steps_start()
-    + [
-        (
-            "poly_features",
-            ColumnTransformer(
-                [("poly", PolynomialFeatures(), ["Mileage", "Capacity"])],
-                remainder="passthrough",
-                verbose_feature_names_out=False,
-            ).set_output(transform="pandas"),
+preprocessing_pipeline_ridge_B = Pipeline([
+    ("add_car_age", CarAgeTransformer(current_year=2025)),
+    (
+        "target_encode",
+        ColumnTransformer(
+            [
+                (
+                    "model_location_encoder",
+                    TargetEncoder(categories="auto", target_type="continuous", smooth="auto", cv=5),
+                    ["Model", "Location"],
+                )
+            ],
+            remainder="passthrough",
+            verbose_feature_names_out=False,
+        ).set_output(transform="pandas"),
+    ),
+    ("frequency_encode", FrequencyEncoderTransformer(columns=["Seller_name"])),
+    (
+        "impute_missing",
+        ColumnTransformer(
+            [
+                (
+                    "body_edition_imputer",
+                    SimpleImputer(strategy="constant", fill_value="unknown"),
+                    ["Body", "Edition"],
+                ),
+            ],
+            remainder="passthrough",
+            verbose_feature_names_out=False,
+        ).set_output(transform="pandas"),
+    ),
+    (
+        "ordinal_encoding",
+        ColumnTransformer(
+            [
+                (
+                    "condition_encoder",
+                    OrdinalEncoder(
+                        categories=[["used", "reconditioned", "new"]],
+                        handle_unknown="use_encoded_value",
+                        unknown_value=-1,
+                    ),
+                    ["Condition"],
+                ),
+            ],
+            remainder="passthrough",
+            verbose_feature_names_out=False,
+        ).set_output(transform="pandas"),
+    ),
+    (
+        "poly_features",
+        ColumnTransformer(
+            [("poly", PolynomialFeatures(), ["Mileage", "Capacity"])],
+            remainder="passthrough",
+            verbose_feature_names_out=False,
+        ).set_output(transform="pandas"),
+    ),
+    (
+        "power_transform",
+        ColumnTransformer(
+            [
+                ("car_age_yj", PowerTransformer(method="yeo-johnson"), ["Car_Age"]),
+                ("year_yj", PowerTransformer(method="yeo-johnson"), ["Year"]),
+            ],
+            remainder="passthrough",
+            verbose_feature_names_out=False,
+        ).set_output(transform="pandas"),
+    ),
+    (
+        "one_hot_encoding",
+        ColumnTransformer(
+            [
+                (
+                    "brand_encoder",
+                    OneHotEncoder(
+                        drop="first",
+                        sparse_output=False,
+                        handle_unknown="infrequent_if_exist",
+                        min_frequency=0.005,
+                    ),
+                    ["Brand"],
+                ),
+                (
+                    "fuel_encoder",
+                    OneHotEncoder(drop="first", sparse_output=False, handle_unknown="ignore"),
+                    ["Fuel"],
+                ),
+                (
+                    "transmission_encoder",
+                    OneHotEncoder(drop="first", sparse_output=False, handle_unknown="ignore"),
+                    ["Transmission"],
+                ),
+                (
+                    "body_encoder",
+                    OneHotEncoder(drop="first", sparse_output=False, handle_unknown="ignore"),
+                    ["Body"],
+                ),
+            ],
+            remainder="passthrough",
+            verbose_feature_names_out=False,
+        ).set_output(transform="pandas"),
+    ),
+    (
+        "text_features",
+        ColumnTransformer(
+            [
+                (
+                    "description_bow",
+                    CountVectorizer(max_features=None, lowercase=True, stop_words="english"),
+                    "Description",
+                ),
+                (
+                    "edition_bow",
+                    CountVectorizer(max_features=None, lowercase=True, stop_words="english"),
+                    "Edition",
+                ),
+            ],
+            remainder="passthrough",
+            verbose_feature_names_out=False,
         ),
-        (
-            "power_transform",
-            ColumnTransformer(
-                [
-                    ("car_age_yj", PowerTransformer(method="yeo-johnson"), ["Car_Age"]),
-                    ("year_yj", PowerTransformer(method="yeo-johnson"), ["Year"]),
-                ],
-                remainder="passthrough",
-                verbose_feature_names_out=False,
-            ).set_output(transform="pandas"),
+    ),
+    ("feature_selection", None),
+    ("scaler", None),
+])
+
+# %%
+preprocessing_pipeline_knn = Pipeline([
+    ("add_car_age", CarAgeTransformer(current_year=2025)),
+    (
+        "target_encode",
+        ColumnTransformer(
+            [
+                (
+                    "model_location_encoder",
+                    TargetEncoder(categories="auto", target_type="continuous", smooth="auto", cv=5),
+                    ["Model", "Location"],
+                )
+            ],
+            remainder="passthrough",
+            verbose_feature_names_out=False,
+        ).set_output(transform="pandas"),
+    ),
+    ("frequency_encode", FrequencyEncoderTransformer(columns=["Seller_name"])),
+    (
+        "impute_missing",
+        ColumnTransformer(
+            [
+                (
+                    "body_edition_imputer",
+                    SimpleImputer(strategy="constant", fill_value="unknown"),
+                    ["Body", "Edition"],
+                ),
+            ],
+            remainder="passthrough",
+            verbose_feature_names_out=False,
+        ).set_output(transform="pandas"),
+    ),
+    (
+        "ordinal_encoding",
+        ColumnTransformer(
+            [
+                (
+                    "condition_encoder",
+                    OrdinalEncoder(
+                        categories=[["used", "reconditioned", "new"]],
+                        handle_unknown="use_encoded_value",
+                        unknown_value=-1,
+                    ),
+                    ["Condition"],
+                ),
+            ],
+            remainder="passthrough",
+            verbose_feature_names_out=False,
+        ).set_output(transform="pandas"),
+    ),
+    (
+        "one_hot_encoding",
+        ColumnTransformer(
+            [
+                (
+                    "brand_encoder",
+                    OneHotEncoder(
+                        drop="first",
+                        sparse_output=False,
+                        handle_unknown="infrequent_if_exist",
+                        min_frequency=0.005,
+                    ),
+                    ["Brand"],
+                ),
+                (
+                    "fuel_encoder",
+                    OneHotEncoder(drop="first", sparse_output=False, handle_unknown="ignore"),
+                    ["Fuel"],
+                ),
+                (
+                    "transmission_encoder",
+                    OneHotEncoder(drop="first", sparse_output=False, handle_unknown="ignore"),
+                    ["Transmission"],
+                ),
+                (
+                    "body_encoder",
+                    OneHotEncoder(drop="first", sparse_output=False, handle_unknown="ignore"),
+                    ["Body"],
+                ),
+            ],
+            remainder="passthrough",
+            verbose_feature_names_out=False,
+        ).set_output(transform="pandas"),
+    ),
+    (
+        "text_features",
+        ColumnTransformer(
+            [
+                (
+                    "description_bow",
+                    CountVectorizer(max_features=None, lowercase=True, stop_words="english"),
+                    "Description",
+                ),
+                (
+                    "edition_bow",
+                    CountVectorizer(max_features=None, lowercase=True, stop_words="english"),
+                    "Edition",
+                ),
+            ],
+            remainder="passthrough",
+            verbose_feature_names_out=False,
         ),
-    ]
-    + create_common_steps_end()
-)
+    ),
+    ("feature_selection", None),
+    ("scaler", None),
+])
+
+# %%
+preprocessing_pipeline_rf = Pipeline([
+    ("add_car_age", CarAgeTransformer(current_year=2025)),
+    (
+        "target_encode",
+        ColumnTransformer(
+            [
+                (
+                    "model_location_encoder",
+                    TargetEncoder(categories="auto", target_type="continuous", smooth="auto", cv=5),
+                    ["Model", "Location"],
+                )
+            ],
+            remainder="passthrough",
+            verbose_feature_names_out=False,
+        ).set_output(transform="pandas"),
+    ),
+    ("frequency_encode", FrequencyEncoderTransformer(columns=["Seller_name"])),
+    (
+        "impute_missing",
+        ColumnTransformer(
+            [
+                (
+                    "body_edition_imputer",
+                    SimpleImputer(strategy="constant", fill_value="unknown"),
+                    ["Body", "Edition"],
+                ),
+            ],
+            remainder="passthrough",
+            verbose_feature_names_out=False,
+        ).set_output(transform="pandas"),
+    ),
+    (
+        "ordinal_encoding",
+        ColumnTransformer(
+            [
+                (
+                    "condition_encoder",
+                    OrdinalEncoder(
+                        categories=[["used", "reconditioned", "new"]],
+                        handle_unknown="use_encoded_value",
+                        unknown_value=-1,
+                    ),
+                    ["Condition"],
+                ),
+            ],
+            remainder="passthrough",
+            verbose_feature_names_out=False,
+        ).set_output(transform="pandas"),
+    ),
+    (
+        "one_hot_encoding",
+        ColumnTransformer(
+            [
+                (
+                    "brand_encoder",
+                    OneHotEncoder(
+                        drop="first",
+                        sparse_output=False,
+                        handle_unknown="infrequent_if_exist",
+                        min_frequency=0.005,
+                    ),
+                    ["Brand"],
+                ),
+                (
+                    "fuel_encoder",
+                    OneHotEncoder(drop="first", sparse_output=False, handle_unknown="ignore"),
+                    ["Fuel"],
+                ),
+                (
+                    "transmission_encoder",
+                    OneHotEncoder(drop="first", sparse_output=False, handle_unknown="ignore"),
+                    ["Transmission"],
+                ),
+                (
+                    "body_encoder",
+                    OneHotEncoder(drop="first", sparse_output=False, handle_unknown="ignore"),
+                    ["Body"],
+                ),
+            ],
+            remainder="passthrough",
+            verbose_feature_names_out=False,
+        ).set_output(transform="pandas"),
+    ),
+    (
+        "text_features",
+        ColumnTransformer(
+            [
+                (
+                    #max features are selected in model selection
+                    "description_bow",
+                    CountVectorizer(max_features=None, lowercase=True, stop_words="english"), 
+                    "Description",
+                ),
+                (
+                    "edition_bow",
+                    CountVectorizer(max_features=None, lowercase=True, stop_words="english"),
+                    "Edition",
+                ),
+            ],
+            remainder="passthrough",
+            verbose_feature_names_out=False,
+        ),
+    ),
+    ("feature_selection", None),
+    ("scaler", None),
+])
+
+# %%
+preprocessing_pipeline_gb = Pipeline([
+    ("add_car_age", CarAgeTransformer(current_year=2025)),
+    (
+        "target_encode",
+        ColumnTransformer(
+            [
+                (
+                    "model_location_encoder",
+                    TargetEncoder(categories="auto", target_type="continuous", smooth="auto", cv=5),
+                    ["Model", "Location"],
+                )
+            ],
+            remainder="passthrough",
+            verbose_feature_names_out=False,
+        ).set_output(transform="pandas"),
+    ),
+    ("frequency_encode", FrequencyEncoderTransformer(columns=["Seller_name"])),
+    (
+        "impute_missing",
+        ColumnTransformer(
+            [
+                (
+                    "body_edition_imputer",
+                    SimpleImputer(strategy="constant", fill_value="unknown"),
+                    ["Body", "Edition"],
+                ),
+            ],
+            remainder="passthrough",
+            verbose_feature_names_out=False,
+        ).set_output(transform="pandas"),
+    ),
+    (
+        "ordinal_encoding",
+        ColumnTransformer(
+            [
+                (
+                    "condition_encoder",
+                    OrdinalEncoder(
+                        categories=[["used", "reconditioned", "new"]],
+                        handle_unknown="use_encoded_value",
+                        unknown_value=-1,
+                    ),
+                    ["Condition"],
+                ),
+            ],
+            remainder="passthrough",
+            verbose_feature_names_out=False,
+        ).set_output(transform="pandas"),
+    ),
+    (
+        "one_hot_encoding",
+        ColumnTransformer(
+            [
+                (
+                    "brand_encoder",
+                    OneHotEncoder(
+                        drop="first",
+                        sparse_output=False,
+                        handle_unknown="infrequent_if_exist",
+                        min_frequency=0.005,
+                    ),
+                    ["Brand"],
+                ),
+                (
+                    "fuel_encoder",
+                    OneHotEncoder(drop="first", sparse_output=False, handle_unknown="ignore"),
+                    ["Fuel"],
+                ),
+                (
+                    "transmission_encoder",
+                    OneHotEncoder(drop="first", sparse_output=False, handle_unknown="ignore"),
+                    ["Transmission"],
+                ),
+                (
+                    "body_encoder",
+                    OneHotEncoder(drop="first", sparse_output=False, handle_unknown="ignore"),
+                    ["Body"],
+                ),
+            ],
+            remainder="passthrough",
+            verbose_feature_names_out=False,
+        ).set_output(transform="pandas"),
+    ),
+    (
+        "text_features",
+        ColumnTransformer(
+            [
+                (
+                    "description_bow",
+                    CountVectorizer(max_features=None, lowercase=True, stop_words="english"),
+                    "Description",
+                ),
+                (
+                    "edition_bow",
+                    CountVectorizer(max_features=None, lowercase=True, stop_words="english"),
+                    "Edition",
+                ),
+            ],
+            remainder="passthrough",
+            verbose_feature_names_out=False,
+        ),
+    ),
+    ("feature_selection", None),
+    ("scaler", None),
+])
 
 # %%
 # since we need to transform the price now
@@ -1129,7 +1548,7 @@ preprocessing_pipeline_B = Pipeline(
 # %%
 from sklearn.linear_model import LinearRegression, Ridge
 from sklearn.neighbors import KNeighborsRegressor
-from sklearn.ensemble import RandomForestRegressor
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
@@ -1167,11 +1586,6 @@ def check_fit(model, X_train, y_train, X_val, y_val, price_transformer):
 #
 # We start with Ridge regression because it handles multicollinearity well (and god do we have a lot of columns now :D)
 #
-# ### Feature Selection Strategy
-#
-# After the initial experiments showed ~1.3M MAE, I added feature selection but this did not improve the error by a lot
-# only around 100k...
-#
 #
 # I had a lot of trouble with the combination of polynomial and power transformed features 
 # (apparently if you first power transform a feature and then add polynomial features from it the model goes nuts and
@@ -1185,33 +1599,33 @@ def check_fit(model, X_train, y_train, X_val, y_val, price_transformer):
 # - Target encoding for Model/Location
 # - One-hot encoding for categorical features
 # - Bag-of-words for text features
-# - Optional feature selection (None, TruncatedSVD)
 #
 # RESULTS:
 # ```
-# Best MAE (CV): 0.22
-# Best params: {'model__alpha': 10, 'preprocessing__feature_selection': None, 'preprocessing__scaler': RobustScaler(), 'preprocessing__text_features__description_bow__max_features': 50, 'preprocessing__text_features__edition_bow__max_features': 50}
-#
-# Train MAE: 1,247,850.77
-# Validation MAE: 1,232,164.04
+# Best MAE (CV): 0.20
+# Best params: {'model__alpha': 3, 'preprocessing__scaler': None, 'preprocessing__text_features__description_bow__max_features': 50, 'preprocessing__text_features__edition_bow__max_features': 50}
+# Train MAE: 1,245,062.41
+# Validation MAE: 1,229,643.90
 # ```
 
 # %%
 full_pipeline_A = Pipeline(
     [
-        ("preprocessing", preprocessing_pipeline_A),
+        ("preprocessing", preprocessing_pipeline_ridge_A),
         ("model", Ridge()),
     ]
 )
 
 param_grid_A = {
     "preprocessing__scaler": [StandardScaler(), RobustScaler(), None],
-    "preprocessing__text_features__description_bow__max_features": [50, 100],
-    "preprocessing__text_features__edition_bow__max_features": [30, 50],
+    "preprocessing__text_features__description_bow__max_features": [50, 100,2000,3000],
+    "preprocessing__text_features__edition_bow__max_features": [30, 50,1000,3000],
     "preprocessing__feature_selection": [
         None,
         TruncatedSVD(n_components=50),
         TruncatedSVD(n_components=100),
+        TruncatedSVD(n_components=1000),
+        TruncatedSVD(n_components=3000),
     ],
     "model__alpha": [0.01, 0.1, 1, 10, 100],
 }
@@ -1235,6 +1649,14 @@ train_mae_A, val_mae_A = check_fit(grid_search_A, X_train, y_train, X_val, y_val
 print(f"Train MAE: {train_mae_A:,.2f}")
 print(f"Validation MAE: {val_mae_A:,.2f}")
 
+# %%
+print(f"Best MAE (CV): {-grid_search_A.best_score_:,.2f}")
+print(f"Best params: {grid_search_A.best_params_}")
+
+train_mae_A, val_mae_A = check_fit(grid_search_A, X_train, y_train, X_val, y_val, price_transformer)
+print(f"Train MAE: {train_mae_A:,.2f}")
+print(f"Validation MAE: {val_mae_A:,.2f}")
+
 # %% [markdown]
 # ### Variant B: Polynomial Features Before Power Transform
 #
@@ -1243,48 +1665,25 @@ print(f"Validation MAE: {val_mae_A:,.2f}")
 # - Then apply power transform to Car_Age and Year (they have the best correlation with price when transformed)
 # - Everything else same as Variant A
 #
-# **Why this order?**
+# *Why this order?*
 # Polynomials on raw features make sense  Mileage * Capacity.
-# Polynomials on power-transformed features create numerical chaos (believe me i tried and i got an error worse than the dummy, around 5mil)
+# Polynomials on power-transformed features explode (believe me i tried and i got an error worse than the dummy, around 5mil)
 #
 #
 # Best params and score:
 # ```
-# Best MAE (CV): 0.19
-# Best params: {'model__alpha': 10, 'preprocessing__feature_selection': TruncatedSVD(n_components=300), 'preprocessing__poly_features__poly__degree': 3, 'preprocessing__poly_features__poly__interaction_only': False, 'preprocessing__scaler': None, 'preprocessing__text_features__description_bow__max_features': 50, 'preprocessing__text_features__edition_bow__max_features': 3000}
-# Train MAE: 1,149,994.71
-# Validation MAE: 1,146,156.91
+# Best MAE (CV): 0.18
+# Best params: {'model__alpha': 10, 'preprocessing__feature_selection': TruncatedSVD(n_components=1000), 'preprocessing__poly_features__poly__degree': 3, 'preprocessing__poly_features__poly__interaction_only': False, 'preprocessing__scaler': None, 'preprocessing__text_features__description_bow__max_features': 50, 'preprocessing__text_features__edition_bow__max_features': 3000}
+# Train MAE: 1,096,486.99
+# Validation MAE: 1,114,562.58
 # ```
-
-# %%
-#Pipeline i tried first:
-# full_pipeline_B = Pipeline(
-#     [
-#         ("preprocessing", preprocessing_pipeline_B),
-#         ("model", Ridge()),
-#     ]
-# )
-
-# param_grid_B = {
-#     "preprocessing__scaler": [StandardScaler(), RobustScaler(), None],
-#     "preprocessing__text_features__description_bow__max_features": [50,100,1000],# Tried a lot of variables here as well
-#     "preprocessing__text_features__edition_bow__max_features": [50,3000], # tried a lot of variables 50 is best
-#     "preprocessing__poly_features__poly__degree": [1, 2,3],
-#     "preprocessing__poly_features__poly__interaction_only": [False, True],
-#     "preprocessing__feature_selection": [
-#         None,
-#         TruncatedSVD(n_components=100),
-#         TruncatedSVD(n_components=300),
-#     ],
-#     "model__alpha": [10,13, 20],# I tried a lot of alphas here, including 0.1, 0,2, 0.5, 1, 5
-# }
 
 # %%
 
 #I'm making the pipeline really small to not run forever. above i have copypasted and commented out the code of the piple i ran.
 full_pipeline_B = Pipeline(
     [
-        ("preprocessing", preprocessing_pipeline_B),
+        ("preprocessing", preprocessing_pipeline_ridge_B),
         ("model", Ridge()),
     ]
 )
@@ -1296,9 +1695,10 @@ param_grid_B = {
     "preprocessing__poly_features__poly__degree": [3,4],
     "preprocessing__poly_features__poly__interaction_only": [False],
     "preprocessing__feature_selection": [
-        TruncatedSVD(n_components=300),
-        TruncatedSVD(n_components=500),
+        None,
         TruncatedSVD(n_components=1000),
+        TruncatedSVD(n_components=2000),
+
     ],
     "model__alpha": [10],# I tried a lot of alphas here, including 0.1, 0,2, 0.5, 1, 5
 }
@@ -1334,38 +1734,27 @@ print(f"Validation MAE: {val_mae_B:,.2f}")
 # ```
 # Best MAE (CV): 0.18
 # Best params: {'model__alpha': 10, 'preprocessing__feature_selection': TruncatedSVD(n_components=1000), 'preprocessing__poly_features__poly__degree': 3, 'preprocessing__poly_features__poly__interaction_only': False, 'preprocessing__scaler': None, 'preprocessing__text_features__description_bow__max_features': 50, 'preprocessing__text_features__edition_bow__max_features': 3000}
-# Train MAE: 1,097,626.17
-# Validation MAE: 1,115,638.54
+# Train MAE: 1,096,486.99
+# Validation MAE: 1,114,562.58
 # ```
 
 # %% [markdown]
 # ### Ridge Results Comparison
+# Variant B performs 2% better than  Variant A
 #
-# Let's see which variant performs better. We'll use the winner's preprocessing pipeline for the other models.
-
-# %%
-print(f" Variant A (No Polynomials):")
-print(f"  CV MAE: {-grid_search_A.best_score_:,.2f}")
-print(f"  Train MAE: {train_mae_A:,.2f}")
-print(f"  Val MAE: {val_mae_A:,.2f}")
-
-print(f" Variant B (Poly Before Transform):")
-print(f"  CV MAE: {-grid_search_B.best_score_:,.2f}")
-print(f"  Train MAE: {train_mae_B:,.2f}")
-print(f"  Val MAE: {val_mae_B:,.2f}")
 
 # %% [markdown]
 # -----------
 # Comparasion
 # ```
 #  Variant A (No Polynomials):
-#   CV MAE: 0.20
-#   Train MAE: 1,247,850.77
-#   Val MAE: 1,232,164.04
+#    CV MAE: 0.20
+#    Train MAE: 1,245,062.41
+#    Validation MAE: 1,229,643.90
 #  Variant B (Poly Before Transform):
-#   CV MAE: 0.18
-#   Train MAE: 1,097,626.17
-#   Val MAE: 1,115,638.54
+#     CV MAE: 0.18
+#     Train MAE: 1,096,486.99
+#     Validation MAE: 1,114,562.58
 # ```
 
 # %% [markdown]
@@ -1383,21 +1772,25 @@ print(f"  Val MAE: {val_mae_B:,.2f}")
 # %%
 full_pipeline_knn = Pipeline(
     [
-        ("preprocessing", preprocessing_pipeline_B),
+        ("preprocessing", preprocessing_pipeline_knn),
         ("model", KNeighborsRegressor()),
     ]
 )
 
 param_grid_knn = {
-    "preprocessing__scaler": [StandardScaler(), RobustScaler(),None],
-    "preprocessing__text_features__description_bow__max_features": [100, 500],
-    "preprocessing__text_features__edition_bow__max_features": [50, 100],
+    "preprocessing__scaler": [StandardScaler(),MinMaxScaler(),None],
+    "preprocessing__text_features__description_bow__max_features": [100,1000,3000 ],
+    "preprocessing__text_features__edition_bow__max_features": [100,1000,3000],
     "preprocessing__feature_selection": [
-        TruncatedSVD(n_components=20),
+        TruncatedSVD(n_components=30),
         TruncatedSVD(n_components=50),
+        # TruncatedSVD(n_components=10),
+        # TruncatedSVD(n_components=1000),
     ],
-    "model__n_neighbors": [20, 30, 40, 50],
-    "model__weights": ["uniform"],  # 'distance' can overfit in small data
+    "model__n_neighbors": [3,5,10, 20],
+    "model__weights": [
+        #"uniform",
+                       "distance"],  # 'distance' can overfit in small data (i tried and it did overfit)
     "model__p": [1,2]
 }
 
@@ -1435,6 +1828,15 @@ print(f"Validation MAE: {val_mae_knn:,.2f}")
 # Train MAE: 1,819,131.15
 # Validation MAE: 1,828,531.55
 # ```
+#
+# AND
+# ```
+# Best MAE (CV): 0.27
+# Best params: {'preprocessing__text_features__edition_bow__max_features': 100, 'preprocessing__text_features__description_bow__max_features': 3000, 'preprocessing__scaler': MinMaxScaler(), 'preprocessing__feature_selection': TruncatedSVD(n_components=30), 'model__weights': 'distance', 'model__p': 2, 'model__n_neighbors': 5}
+# Train MAE: 152,643.64
+# Validation MAE: 1,651,219.42
+# ```
+# Second one is better but it is overfitting heavily. And i really don't think this is a good model for this dataset so I will just leave it as is
 
 # %% [markdown]
 # ## Random Forest
@@ -1445,7 +1847,7 @@ print(f"Validation MAE: {val_mae_knn:,.2f}")
 # %%
 full_pipeline_rf = Pipeline(
     [
-        ("preprocessing", preprocessing_pipeline_B),
+        ("preprocessing", preprocessing_pipeline_rf),
         ("model", RandomForestRegressor(random_state=rngs)),
     ]
 )
@@ -1466,7 +1868,7 @@ param_grid_rf = {
     "preprocessing__text_features__description_bow__max_features": [1000],
     "preprocessing__text_features__edition_bow__max_features": [500],
     "preprocessing__scaler": [None],
-    "preprocessing__feature_selection": [None],
+    "preprocessing__feature_selection": [None],# feature selection is pretty much automatic due to trees
     "model__n_estimators": [200],
     "model__max_depth": [20],
     "model__min_samples_split": [5],
@@ -1507,9 +1909,63 @@ print(f"Validation MAE: {val_mae_rf:,.2f}")
 # Best MAE (CV): 0.12
 # Best params: {'preprocessing__text_features__edition_bow__max_features': 500, 'preprocessing__text_features__description_bow__max_features': 1000, 'preprocessing__scaler': None, 'preprocessing__feature_selection': None, 'model__n_estimators': 200, 'model__min_samples_split': 5, 'model__min_samples_leaf': 2, 'model__max_features': 0.5, 'model__max_depth': 20}
 #
-# Train MAE: 392,733.11
-# Validation MAE: 738,201.77
+# Train MAE: 399,056.59
+# Validation MAE: 725,035.66
 # ```
+
+# %% [markdown]
+# ## Gradient Boosting
+
+# %%
+full_pipeline_gb = Pipeline(
+    [
+        ("preprocessing", preprocessing_pipeline_gb),
+        ("model", GradientBoostingRegressor(random_state=rngs)),
+    ]
+)
+
+param_grid_gb = {
+    "preprocessing__text_features__description_bow__max_features": [1000, 3000],
+    "preprocessing__text_features__edition_bow__max_features": [500, 1000],
+    "preprocessing__scaler": [None],
+    "preprocessing__feature_selection": [None],
+    "model__n_estimators": [100, 200],
+    "model__max_depth": [5, 10],
+    "model__learning_rate": [0.01, 0.1],
+    "model__subsample": [0.8, 1.0],
+    "model__min_samples_split": [2, 5],
+}
+
+# %%
+print("GRADIENT BOOSTING")
+
+random_search_gb = RandomizedSearchCV(
+    full_pipeline_gb,
+    param_grid_gb,
+    n_iter=50,
+    cv=5,
+    scoring="neg_mean_absolute_error",
+    n_jobs=-1,
+    verbose=2,
+    random_state=rngs,
+)
+random_search_gb.fit(X_train, y_train_transformed)
+
+# %%
+print(f"\nBest MAE (CV): {-random_search_gb.best_score_:,.2f}")
+print(f"Best params: {random_search_gb.best_params_}")
+
+train_mae_gb, val_mae_gb = check_fit(random_search_gb, X_train, y_train, X_val, y_val, price_transformer)
+print(f"\nTrain MAE: {train_mae_gb:,.2f}")
+print(f"Validation MAE: {val_mae_gb:,.2f}")
+
+# %% [markdown]
+# Best model yet!:
+# ```
+# Best MAE (CV): 0.12
+# Best params: {'preprocessing__text_features__edition_bow__max_features': 500, 'preprocessing__text_features__description_bow__max_features': 1000, 'preprocessing__scaler': None, 'preprocessing__feature_selection': None, 'model__subsample': 0.8, 'model__n_estimators': 200, 'model__min_samples_split': 2, 'model__max_depth': 10, 'model__learning_rate': 0.1}
+# ```
+#
 
 # %% [markdown]
 # ## Final Model Comparison
@@ -1526,6 +1982,7 @@ results = {
     "Ridge (Variant B)": (grid_search_B, -grid_search_B.best_score_, train_mae_B, val_mae_B),
     "KNN": (random_search_knn, -random_search_knn.best_score_, train_mae_knn, val_mae_knn),
     "Random Forest": (random_search_rf, -random_search_rf.best_score_, train_mae_rf, val_mae_rf),
+    "Gradient Boosting": (random_search_gb, -random_search_gb.best_score_, train_mae_gb, val_mae_gb),
 }
 
 for model_name, (model, cv_mae, train_mae, val_mae) in results.items():
@@ -1542,7 +1999,7 @@ best_model = best_model_name[1][0]
 # # Get the best model and test it
 
 # %%
-test_mae_rf, _ = check_fit(random_search_rf,
+test_mae_rf, _ = check_fit(random_search_gb,
   X_test, y_test, X_test, y_test,
   price_transformer)
 print(f"Test MAE: {test_mae_rf:,.2f}")
