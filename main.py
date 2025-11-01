@@ -321,8 +321,8 @@ cleaning_pipeline = Pipeline(
             "clip_outliers",
             OutlierClipperTransformer(
                 clip_config={
-                    "Capacity": (None, 6500),
-                    "Price": (None, 126500000),
+                    "Capacity": (None, 6200),
+                    "Price": (None, 100000000),
                 }
             ),
         ),
@@ -1881,7 +1881,7 @@ param_grid_rf = {
 print("RANDOM FOREST")
 
 
-random_search_rf = RandomizedSearchCV(
+random_search_rf = GridSearchCV(
     full_pipeline_rf,
     param_grid_rf,
     n_iter=50,
@@ -1929,7 +1929,7 @@ param_grid_gb = {
     "preprocessing__text_features__edition_bow__max_features": [500, 1000],
     "preprocessing__scaler": [None],
     "preprocessing__feature_selection": [None],
-    "model__n_estimators": [100, 200],
+    "model__n_estimators": [200],
     "model__max_depth": [5, 10],
     "model__learning_rate": [0.01, 0.1],
     "model__subsample": [0.8, 1.0],
@@ -1939,15 +1939,13 @@ param_grid_gb = {
 # %%
 print("GRADIENT BOOSTING")
 
-random_search_gb = RandomizedSearchCV(
+random_search_gb = GridSearchCV(
     full_pipeline_gb,
     param_grid_gb,
-    n_iter=50,
     cv=5,
     scoring="neg_mean_absolute_error",
     n_jobs=-1,
     verbose=2,
-    random_state=rngs,
 )
 random_search_gb.fit(X_train, y_train_transformed)
 
@@ -1963,7 +1961,10 @@ print(f"Validation MAE: {val_mae_gb:,.2f}")
 # Best model yet!:
 # ```
 # Best MAE (CV): 0.12
-# Best params: {'preprocessing__text_features__edition_bow__max_features': 500, 'preprocessing__text_features__description_bow__max_features': 1000, 'preprocessing__scaler': None, 'preprocessing__feature_selection': None, 'model__subsample': 0.8, 'model__n_estimators': 200, 'model__min_samples_split': 2, 'model__max_depth': 10, 'model__learning_rate': 0.1}
+# Best params: {'model__learning_rate': 0.1, 'model__max_depth': 10, 'model__min_samples_split': 2, 'model__n_estimators': 200, 'model__subsample': 0.8, 'preprocessing__feature_selection': None, 'preprocessing__scaler': None, 'preprocessing__text_features__description_bow__max_features': 3000, 'preprocessing__text_features__edition_bow__max_features': 1000}
+#
+# Train MAE: 264,073.85
+# Validation MAE: 689,964.10
 # ```
 #
 
@@ -2004,5 +2005,43 @@ test_mae_rf, _ = check_fit(random_search_gb,
   price_transformer)
 print(f"Test MAE: {test_mae_rf:,.2f}")
 
+
+# %%
+
+# %%
+
+# %%
+
+# %%
+
+# %%
+
+# %%
+
+# %%
+
+# %%
+
+# %%
+
+# %%
+
+# %%
+
+# %%
+
+# %%
+
+# %%
+
+# %%
+
+# %%
+
+# %%
+
+# %%
+
+# %%
 
 # %%
