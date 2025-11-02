@@ -540,6 +540,15 @@ df_train_copy = df_train.copy()
 # %%
 df_train_copy.describe()
 
+# %% [markdown]
+# the std for price is huge! 7.935010e+06
+# I need to look at whether this data is actually valid.
+#
+
+# %%
+df_train_copy.sort_values("Price",ascending=False).head()
+
+
 # %%
 from scipy.stats import skew
 
@@ -640,6 +649,12 @@ df_train_copy["Price_transformed"], lambda_price = yeojohnson(df_train_copy["Pri
 
 
 # %%
+lambda_price
+
+# %% [markdown]
+# lambda shows how close to log - sqrt the transformation is. 
+
+# %%
 
 plot_scatter_analysis(df_train_copy, "Car_Age_transformed", y_col="Price_transformed", show_correlation=True)
 
@@ -696,6 +711,9 @@ correlation_features = [
 ]
 plot_distributions(df_train_copy, correlation_features, transformed=True)
 
+
+# %% [markdown]
+# Price is still skewed to the right but is def better
 
 # %% [markdown]
 # ----------
@@ -1389,7 +1407,7 @@ from sklearn.metrics import mean_absolute_error
 # ### Let's Start with the DummyRegressor
 
 # %%
-grid_search_A = DummyRegressor(strategy='mean')
+grid_search_A = DummyRegressor(strategy="mean")
 grid_search_A.fit(X_train, y_train)
 
 grid_search_A.best_score_ = mean_absolute_error(y_train, grid_search_A.predict(X_train))
@@ -1414,6 +1432,7 @@ warnings.filterwarnings("ignore")
 
 # %%
 tscv = TimeSeriesSplit(n_splits=5)
+
 
 # %%
 def check_fit(model, X_train, y_train, X_test, y_test):
@@ -1441,7 +1460,6 @@ def evaluate_model(model, X_train, y_train):
     return train_mae
 
 
-
 # %% [markdown]
 # ## Ridge Regression
 
@@ -1451,12 +1469,20 @@ def evaluate_model(model, X_train, y_train):
 # %%
 full_pipeline_A = create_pipeline(preprocessing_pipeline_ridge_A, Ridge(), transform_target=True)
 
+# param_grid_A = {
+#     "regressor__preprocessing__scaler": [None],
+#     "regressor__preprocessing__text_features__description_bow__max_features": [1],
+#     "regressor__preprocessing__text_features__edition_bow__max_features": [300],
+#     "regressor__preprocessing__feature_selection": [PCA(n_components=100)],
+#     "regressor__model__alpha": [10],
+# }
+
 param_grid_A = {
     "regressor__preprocessing__scaler": [None],
-    "regressor__preprocessing__text_features__description_bow__max_features": [1],
+    "regressor__preprocessing__text_features__description_bow__max_features": [1, 500],
     "regressor__preprocessing__text_features__edition_bow__max_features": [300],
-    "regressor__preprocessing__feature_selection": [PCA(n_components=100)],
-    "regressor__model__alpha": [10],
+    "regressor__preprocessing__feature_selection": [PCA(n_components=100), PCA(n_components=150)],
+    "regressor__model__alpha": [5, 10, 15],
 }
 
 grid_search_A = GridSearchCV(full_pipeline_A, param_grid_A, cv=tscv, scoring="neg_mean_absolute_error", n_jobs=-1, verbose=2)
@@ -1467,7 +1493,8 @@ train_mae_A = evaluate_model(grid_search_A, X_train, y_train)
 # %% [markdown]
 # Ridge A results (from previous run):
 # ```
-# CV: 1,198,046 | Train: 1,078,344
+# Best Params: {'regressor__model__alpha': 5, 'regressor__preprocessing__feature_selection': PCA(n_components=150), 'regressor__preprocessing__scaler': None, 'regressor__preprocessing__text_features__description_bow__max_features': 1, 'regressor__preprocessing__text_features__edition_bow__max_features': 300}
+# CV: 1,260,946 | Train: 1,129,763
 # ```
 
 # %% [markdown]
@@ -1476,25 +1503,39 @@ train_mae_A = evaluate_model(grid_search_A, X_train, y_train)
 # %%
 full_pipeline_B = create_pipeline(preprocessing_pipeline_ridge_B, Ridge(), transform_target=True)
 
+# param_grid_B = {
+#     "regressor__preprocessing__scaler": [None],
+#     "regressor__preprocessing__text_features__description_bow__max_features": [1],
+#     "regressor__preprocessing__text_features__edition_bow__max_features": [300],
+#     "regressor__preprocessing__poly_features__poly__degree": [2],
+#     "regressor__preprocessing__poly_features__poly__interaction_only": [False],
+#     "regressor__preprocessing__feature_selection": [PCA(n_components=100)],
+#     "regressor__model__alpha": [15],
+# }
+
 param_grid_B = {
-    "regressor__preprocessing__scaler": [None],
-    "regressor__preprocessing__text_features__description_bow__max_features": [1],
-    "regressor__preprocessing__text_features__edition_bow__max_features": [300],
+    "regressor__preprocessing__scaler": [None, StandardScaler()],
+    "regressor__preprocessing__text_features__description_bow__max_features": [1, 1000],
+    "regressor__preprocessing__text_features__edition_bow__max_features": [300, 500],
     "regressor__preprocessing__poly_features__poly__degree": [2],
     "regressor__preprocessing__poly_features__poly__interaction_only": [False],
-    "regressor__preprocessing__feature_selection": [PCA(n_components=100)],
-    "regressor__model__alpha": [15],
+    "regressor__preprocessing__feature_selection": [PCA(n_components=100), None],
+    "regressor__model__alpha": [10, 15, 20],
 }
 
 grid_search_B = GridSearchCV(full_pipeline_B, param_grid_B, cv=tscv, scoring="neg_mean_absolute_error", n_jobs=-1, verbose=2)
 grid_search_B.fit(X_train, y_train)
 
+
+
+# %%
 train_mae_B = evaluate_model(grid_search_B, X_train, y_train)
 
 # %% [markdown]
 # Ridge B results (from previous run):
 # ```
-# CV: 1,188,608 | Train: 1,058,592
+# Best Params: {'regressor__model__alpha': 10, 'regressor__preprocessing__feature_selection': PCA(n_components=100), 'regressor__preprocessing__poly_features__poly__degree': 2, 'regressor__preprocessing__poly_features__poly__interaction_only': False, 'regressor__preprocessing__scaler': None, 'regressor__preprocessing__text_features__description_bow__max_features': 1, 'regressor__preprocessing__text_features__edition_bow__max_features': 500}
+# CV: 1,258,197 | Train: 1,121,169
 # ```
 
 # %% [markdown]
@@ -1506,11 +1547,21 @@ train_mae_B = evaluate_model(grid_search_B, X_train, y_train)
 # %%
 full_pipeline_knn = create_pipeline(preprocessing_pipeline_knn, KNeighborsRegressor(), transform_target=True)
 
+# param_grid_knn = {
+#     "regressor__model__n_neighbors": [10],
+#     "regressor__preprocessing__scaler": [StandardScaler()],
+#     "regressor__preprocessing__feature_selection": [PCA(n_components=50)],
+#     "regressor__preprocessing__text_features__description_bow__max_features": [1],
+#     "regressor__preprocessing__text_features__edition_bow__max_features": [400],
+# }
+
 param_grid_knn = {
-    "regressor__model__n_neighbors": [10],
+    "regressor__model__n_neighbors": [10, 15, 20],
+    "regressor__model__weights": ["uniform", "distance"],
+    "regressor__model__metric": ["euclidean"],
     "regressor__preprocessing__scaler": [StandardScaler()],
     "regressor__preprocessing__feature_selection": [PCA(n_components=50)],
-    "regressor__preprocessing__text_features__description_bow__max_features": [1],
+    "regressor__preprocessing__text_features__description_bow__max_features": [1, 300],
     "regressor__preprocessing__text_features__edition_bow__max_features": [400],
 }
 
@@ -1532,16 +1583,29 @@ train_mae_knn = evaluate_model(grid_search_knn, X_train, y_train)
 # %%
 full_pipeline_rf = create_pipeline(preprocessing_pipeline_rf, RandomForestRegressor(random_state=rngs), transform_target=True)
 
+# param_grid_rf = {
+#     "regressor__preprocessing__text_features__description_bow__max_features": [1],
+#     "regressor__preprocessing__text_features__edition_bow__max_features": [1],
+#     "regressor__preprocessing__scaler": [None],
+#     "regressor__preprocessing__feature_selection": [None],
+#     "regressor__model__n_estimators": [100],
+#     "regressor__model__max_depth": [12],
+#     "regressor__model__min_samples_split": [20],
+#     "regressor__model__min_samples_leaf": [10],
+#     "regressor__model__max_features": ["sqrt"],
+# }
+
 param_grid_rf = {
-    "regressor__preprocessing__text_features__description_bow__max_features": [1],
+    "regressor__preprocessing__text_features__description_bow__max_features": [1, 500],
     "regressor__preprocessing__text_features__edition_bow__max_features": [1],
     "regressor__preprocessing__scaler": [None],
     "regressor__preprocessing__feature_selection": [None],
-    "regressor__model__n_estimators": [100],
-    "regressor__model__max_depth": [12],
-    "regressor__model__min_samples_split": [20],
-    "regressor__model__min_samples_leaf": [10],
+    "regressor__model__n_estimators": [100, 150],
+    "regressor__model__max_depth": [12, 15],
+    "regressor__model__min_samples_split": [10, 20],
+    "regressor__model__min_samples_leaf": [5, 10],
     "regressor__model__max_features": ["sqrt"],
+    "regressor__model__bootstrap": [True],
 }
 
 grid_search_rf = GridSearchCV(full_pipeline_rf, param_grid_rf, cv=tscv, scoring="neg_mean_absolute_error", n_jobs=-1, verbose=2)
@@ -1562,20 +1626,44 @@ train_mae_rf = evaluate_model(grid_search_rf, X_train, y_train)
 # GB: With power-transformed target
 
 # %%
-full_pipeline_gb = create_pipeline(preprocessing_pipeline_gb, GradientBoostingRegressor(random_state=rngs), transform_target=True)
+full_pipeline_gb = Pipeline(
+    [
+        ("drop_published_date", ColumnNukerTransformer(columns_to_drop=[])),
+        ("preprocessing", preprocessing_pipeline_gb),
+        ("model", GradientBoostingRegressor(random_state=rngs)),
+    ]
+)
+full_pipeline_gb = TransformedTargetRegressor(regressor=full_pipeline_gb, transformer=PowerTransformer(method="yeo-johnson"))
+
+# param_grid_gb = {
+#     "regressor__preprocessing__text_features__description_bow__max_features": [1],
+#     "regressor__preprocessing__text_features__edition_bow__max_features": [500],
+#     "regressor__preprocessing__scaler": [None],
+#     "regressor__preprocessing__feature_selection": [None],
+#     "regressor__model__n_estimators": [200],
+#     "regressor__model__max_depth": [7],
+#     "regressor__model__learning_rate": [0.05],
+#     "regressor__model__subsample": [0.8],
+#     "regressor__model__min_samples_split": [5],
+#     "regressor__model__min_samples_leaf": [5],
+#     "regressor__model__max_features": [None],
+# }
 
 param_grid_gb = {
-    "regressor__preprocessing__text_features__description_bow__max_features": [1],
+    "regressor__drop_published_date__columns_to_drop": [None, ["Published_Date"]],
+    "regressor__preprocessing__text_features__description_bow__max_features": [1, 1000],
     "regressor__preprocessing__text_features__edition_bow__max_features": [500],
     "regressor__preprocessing__scaler": [None],
-    "regressor__preprocessing__feature_selection": [None],
-    "regressor__model__n_estimators": [200],
-    "regressor__model__max_depth": [7],
-    "regressor__model__learning_rate": [0.05],
+    "regressor__preprocessing__feature_selection": [
+        None,
+    ],
+    "regressor__model__n_estimators": [200, 250],
+    "regressor__model__max_depth": [6, 7, 8],
+    "regressor__model__learning_rate": [0.05, 0.07],
     "regressor__model__subsample": [0.8],
     "regressor__model__min_samples_split": [5],
-    "regressor__model__min_samples_leaf": [5],
-    "regressor__model__max_features": [None],
+    "regressor__model__min_samples_leaf": [3, 5],
+    "regressor__model__max_features": [None, "sqrt"],
 }
 
 grid_search_gb = GridSearchCV(full_pipeline_gb, param_grid_gb, cv=tscv, scoring="neg_mean_absolute_error", n_jobs=-1, verbose=2)
@@ -1586,7 +1674,8 @@ train_mae_gb = evaluate_model(grid_search_gb, X_train, y_train)
 # %% [markdown]
 # Gradient Boosting results (from previous run):
 # ```
-# CV: 766,847 | Train: 487,241
+# Best Params: {'regressor__drop_published_date__columns_to_drop': ['Published_Date'], 'regressor__model__learning_rate': 0.07, 'regressor__model__max_depth': 7, 'regressor__model__max_features': None, 'regressor__model__min_samples_leaf': 3, 'regressor__model__min_samples_split': 5, 'regressor__model__n_estimators': 250, 'regressor__model__subsample': 0.8, 'regressor__preprocessing__feature_selection': None, 'regressor__preprocessing__scaler': None, 'regressor__preprocessing__text_features__description_bow__max_features': 1, 'regressor__preprocessing__text_features__edition_bow__max_features': 500}
+# CV: 848,807 | Train: 561,231
 # ```
 
 # %% [markdown]
@@ -1615,54 +1704,7 @@ print(f"  Mean Price: {df_test['Price'].mean()}")
 print(f"\nMean Published_Date (Train): {pd.Timestamp(df_train['Published_Date'].mean(), unit='s')}")
 print(f"Mean Published_Date (Test): {pd.Timestamp(df_test['Published_Date'].mean(), unit='s')}")
 
-print(f"\nPrice difference: {df_test['Price'].mean()/df_train['Price'].mean()}")
-
-# %% [markdown]
-# ## Test Best Model With/Without Published_Date
-
-# %%
-pipeline_gb_best = Pipeline(
-    [
-        ("drop_published_date", ColumnNukerTransformer(columns_to_drop=[])),
-        ("preprocessing", preprocessing_pipeline_gb),
-        ("model", GradientBoostingRegressor(random_state=rngs)),
-    ]
-)
-
-param_grid_gb_best = {
-    "drop_published_date__columns_to_drop": [None,["Published_Date"]],
-    "preprocessing__text_features__description_bow__max_features": [1000],
-    "preprocessing__text_features__edition_bow__max_features": [500],
-    "preprocessing__scaler": [None],
-    "model__n_estimators": [200],
-    "model__max_depth": [7],
-    "model__learning_rate": [0.05],
-    "model__subsample": [0.8],
-    "model__min_samples_split": [5],
-    "model__min_samples_leaf": [3],
-    "model__max_features": [None],
-}
-
-# %%
-print("GRADIENT BOOSTING - BEST PARAMS +/- PUBLISHED_DATE")
-
-grid_search_gb_best = GridSearchCV(
-    pipeline_gb_best,
-    param_grid_gb_best,
-    cv=tscv,
-    scoring="neg_mean_absolute_error",
-    n_jobs=-1,
-    verbose=2,
-)
-grid_search_gb_best.fit(X_train, y_train)
-
-
-# %%
-train_mae_gb_best = mean_absolute_error(y_train, grid_search_gb_best.predict(X_train))
-print(f"\nBest MAE (CV): {-grid_search_gb_best.best_score_:,.2f}")
-print(f"Best params: {grid_search_gb_best.best_params_}")
-print(f"Train MAE: {train_mae_gb_best:,.2f}")
-
+print(f"\nPrice difference: {df_test['Price'].mean() / df_train['Price'].mean()}")
 
 # %% [markdown]
 # ## Final Model Comparison
@@ -1678,7 +1720,6 @@ results = {
     "KNN": (grid_search_knn, -grid_search_knn.best_score_, train_mae_knn),
     "Random Forest": (grid_search_rf, -grid_search_rf.best_score_, train_mae_rf),
     "Gradient Boosting": (grid_search_gb, -grid_search_gb.best_score_, train_mae_gb),
-    "GB (Best +/- Published_Date)": (grid_search_gb_best, -grid_search_gb_best.best_score_, train_mae_gb_best),
 }
 
 for model_name, (model, cv_mae, train_mae) in results.items():
@@ -1711,4 +1752,3 @@ print(f"Train: {df_train['Price'].mean():,.0f}")
 print(f"Test: {df_test['Price'].mean():,.0f}")
 
 # %%
-print(f"Test MAE / mean price: {1_737_445 / 7_883_986 * 100:.1f}%")
