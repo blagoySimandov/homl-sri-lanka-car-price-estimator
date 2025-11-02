@@ -1,5 +1,5 @@
 # %% [markdown]
-# # Load the dataset and intial "exploration"
+# # Load the dataset
 # %%
 import pandas as pd
 
@@ -303,6 +303,31 @@ class OutlierClipperTransformer(BaseEstimator, TransformerMixin):
         return X
 
 
+# After analysis, winsorization will actually remove valid candidates and should not be done.
+class WinsorizeTransformer(BaseEstimator, TransformerMixin):
+    def __init__(self, columns, limits=(0.01, 0.01)):
+        self.columns = columns
+        self.limits = limits
+        self.lower_bounds_ = {}
+        self.upper_bounds_ = {}
+
+    def fit(self, X, y=None):
+        X = X.copy()
+        for col in self.columns:
+            if col in X.columns:
+                lower_pct, upper_pct = self.limits
+                self.lower_bounds_[col] = X[col].quantile(lower_pct)
+                self.upper_bounds_[col] = X[col].quantile(1 - upper_pct)
+        return self
+
+    def transform(self, X):
+        X = X.copy()
+        for col in self.columns:
+            if col in X.columns and col in self.lower_bounds_:
+                X[col] = X[col].clip(lower=self.lower_bounds_[col], upper=self.upper_bounds_[col])
+        return X
+
+
 # %%
 cleaning_pipeline = Pipeline(
     [
@@ -318,6 +343,8 @@ cleaning_pipeline = Pipeline(
                 }
             ),
         ),
+        #I later decided that winsorization will actually drop valid data...
+        # ("winsorize", WinsorizeTransformer(columns=["Price", "Mileage", "Capacity"], limits=(0.01, 0.01))),
         (
             "clip_outliers",
             OutlierClipperTransformer(
@@ -370,28 +397,24 @@ df_cleaned[df_cleaned["Edition"].isna()].head()
 # %% [markdown]
 # # Train-Test Split
 
+# %% [markdown]
+# Split training set into  training and test. We are ordering by Published_Date to prevent leakage.
+# We don't want the model to "see the future".
+
 # %%
 df_cleaned = df_cleaned.sort_values("Published_Date").reset_index(drop=True)
-
 X = df_cleaned.drop("Price", axis=1)
 y = df_cleaned["Price"]
-
 n = len(df_cleaned)
-train_size = int(0.85 * n)
-
+train_size = int(0.8 * n)
 X_train = X.iloc[:train_size]
 X_test = X.iloc[train_size:]
-
 y_train = y.iloc[:train_size]
 y_test = y.iloc[train_size:]
 
-df_train = X_train.copy()
-df_train["Price"] = y_train
-df_test = X_test.copy()
-df_test["Price"] = y_test
+df_train = df_cleaned.iloc[:train_size]
+df_test = df_cleaned.iloc[train_size:]
 
-print(f"training set size: {len(df_train)}")
-print(f"test set size: {len(df_test)}")
 
 # %% [markdown]
 # # EDA - Exploritary Data Analysis
@@ -789,6 +812,12 @@ df_train_copy["Mileage_per_Year"].corr(df_train_copy["Price"])
 # %%
 plot_scatter_analysis(df_train_copy, "Mileage_per_Year", y_col="Price")
 
+# %%
+len(df_train_copy[df_train_copy.apply(lambda row: str(row["Price"]) in str(row["Description"]), axis=1)])  # check if the price is in a lot of descriptions
+
+# %% [markdown]
+# Interesting but not good enough for me...
+
 # %% [markdown]
 # Non linear relationship. Although linear regression will not be able to get it, random forest or knn might be able to pick it up.
 
@@ -907,7 +936,7 @@ plot_category_vs_target(df_train_copy, "Year_Month", "Price", top_n=len(df_train
 
 # %% [markdown]
 # This is bad. There is no good correlation between the published_date and the price. I feel like our dataset is too small  for this.
-# There is a lot of deviation month to month...
+# There is a lot of deviation month to month... And as you can see the months don't follow any particular order. 
 
 # %%
 price_corr_with_time = df_train_copy["Published_Date"].corr(df_train_copy["Price"])
@@ -1391,32 +1420,36 @@ preprocessing_pipeline_gb = preprocessing_pipeline_ridge_A
 # After cleaning and preprocessing the data, we now need to find the best model for predicting car prices.
 #
 # All models will be tested with feature selection to find the optimal combination.
+#
+# We are using TimeSeriesSplit to prevent data leakage from the test set.
+# (we shouldn't be able to see the future)
 
 # %%
 from sklearn.linear_model import LinearRegression, Ridge
 from sklearn.neighbors import KNeighborsRegressor
 from sklearn.decomposition import PCA
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
-from sklearn.model_selection import GridSearchCV, RandomizedSearchCV, TimeSeriesSplit
+from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
 from sklearn.dummy import DummyRegressor
 
 
+
 from sklearn.metrics import mean_absolute_error
+from sklearn.model_selection import TimeSeriesSplit
+tscv = TimeSeriesSplit(n_splits=5)
 
 # %% [markdown]
 # ### Let's Start with the DummyRegressor
 
 # %%
-grid_search_A = DummyRegressor(strategy="mean")
-grid_search_A.fit(X_train, y_train)
+dummy_model = DummyRegressor(strategy="mean")
+dummy_model.fit(X_train, y_train)
 
-grid_search_A.best_score_ = mean_absolute_error(y_train, grid_search_A.predict(X_train))
-
-
-print(f"{grid_search_A.best_score_:,.0f}")
+dummy_mae = mean_absolute_error(y_test, dummy_model.predict(X_test))
+print(f"Dummy Model MAE: {dummy_mae:,.0f}")
 
 # %% [markdown]
-# We need to beat an error of `4,552,521`.
+# We need to beat an error of `5,773,067`.
 
 # %% [markdown]
 # Warnings flood the console and it gets annoying. I know it's not a good practice to ignore all of them
@@ -1427,12 +1460,11 @@ import warnings
 
 warnings.filterwarnings("ignore")
 
+
 # %% [markdown]
 # Still using TimeSeriesSplit to prevent leakadge (model shouldnt have training data with "future" car publishing dates)
 
 # %%
-tscv = TimeSeriesSplit(n_splits=5)
-
 
 # %%
 def check_fit(model, X_train, y_train, X_test, y_test):
@@ -1471,18 +1503,18 @@ full_pipeline_A = create_pipeline(preprocessing_pipeline_ridge_A, Ridge(), trans
 
 # param_grid_A = {
 #     "regressor__preprocessing__scaler": [None],
-#     "regressor__preprocessing__text_features__description_bow__max_features": [1],
+#     "regressor__preprocessing__text_features__description_bow__max_features": [1, 500],
 #     "regressor__preprocessing__text_features__edition_bow__max_features": [300],
-#     "regressor__preprocessing__feature_selection": [PCA(n_components=100)],
-#     "regressor__model__alpha": [10],
+#     "regressor__preprocessing__feature_selection": [PCA(n_components=100), PCA(n_components=150)],
+#     "regressor__model__alpha": [5, 10, 15],
 # }
 
 param_grid_A = {
     "regressor__preprocessing__scaler": [None],
-    "regressor__preprocessing__text_features__description_bow__max_features": [1, 500],
+    "regressor__preprocessing__text_features__description_bow__max_features": [1],
     "regressor__preprocessing__text_features__edition_bow__max_features": [300],
-    "regressor__preprocessing__feature_selection": [PCA(n_components=100), PCA(n_components=150)],
-    "regressor__model__alpha": [5, 10, 15],
+    "regressor__preprocessing__feature_selection": [PCA(n_components=150)],
+    "regressor__model__alpha": [5],
 }
 
 grid_search_A = GridSearchCV(full_pipeline_A, param_grid_A, cv=tscv, scoring="neg_mean_absolute_error", n_jobs=-1, verbose=2)
@@ -1504,23 +1536,23 @@ train_mae_A = evaluate_model(grid_search_A, X_train, y_train)
 full_pipeline_B = create_pipeline(preprocessing_pipeline_ridge_B, Ridge(), transform_target=True)
 
 # param_grid_B = {
-#     "regressor__preprocessing__scaler": [None],
-#     "regressor__preprocessing__text_features__description_bow__max_features": [1],
-#     "regressor__preprocessing__text_features__edition_bow__max_features": [300],
+#     "regressor__preprocessing__scaler": [None, StandardScaler()],
+#     "regressor__preprocessing__text_features__description_bow__max_features": [1, 1000],
+#     "regressor__preprocessing__text_features__edition_bow__max_features": [300, 500],
 #     "regressor__preprocessing__poly_features__poly__degree": [2],
 #     "regressor__preprocessing__poly_features__poly__interaction_only": [False],
-#     "regressor__preprocessing__feature_selection": [PCA(n_components=100)],
-#     "regressor__model__alpha": [15],
+#     "regressor__preprocessing__feature_selection": [PCA(n_components=100), None],
+#     "regressor__model__alpha": [10, 15, 20],
 # }
 
 param_grid_B = {
-    "regressor__preprocessing__scaler": [None, StandardScaler()],
-    "regressor__preprocessing__text_features__description_bow__max_features": [1, 1000],
-    "regressor__preprocessing__text_features__edition_bow__max_features": [300, 500],
+    "regressor__preprocessing__scaler": [None],
+    "regressor__preprocessing__text_features__description_bow__max_features": [1],
+    "regressor__preprocessing__text_features__edition_bow__max_features": [500],
     "regressor__preprocessing__poly_features__poly__degree": [2],
     "regressor__preprocessing__poly_features__poly__interaction_only": [False],
-    "regressor__preprocessing__feature_selection": [PCA(n_components=100), None],
-    "regressor__model__alpha": [10, 15, 20],
+    "regressor__preprocessing__feature_selection": [PCA(n_components=100)],
+    "regressor__model__alpha": [10],
 }
 
 grid_search_B = GridSearchCV(full_pipeline_B, param_grid_B, cv=tscv, scoring="neg_mean_absolute_error", n_jobs=-1, verbose=2)
@@ -1548,20 +1580,22 @@ train_mae_B = evaluate_model(grid_search_B, X_train, y_train)
 full_pipeline_knn = create_pipeline(preprocessing_pipeline_knn, KNeighborsRegressor(), transform_target=True)
 
 # param_grid_knn = {
-#     "regressor__model__n_neighbors": [10],
+#     "regressor__model__n_neighbors": [10, 15, 20],
+#     "regressor__model__weights": ["uniform", "distance"],
+#     "regressor__model__metric": ["euclidean"],
 #     "regressor__preprocessing__scaler": [StandardScaler()],
 #     "regressor__preprocessing__feature_selection": [PCA(n_components=50)],
-#     "regressor__preprocessing__text_features__description_bow__max_features": [1],
+#     "regressor__preprocessing__text_features__description_bow__max_features": [1, 300],
 #     "regressor__preprocessing__text_features__edition_bow__max_features": [400],
 # }
 
 param_grid_knn = {
-    "regressor__model__n_neighbors": [10, 15, 20],
-    "regressor__model__weights": ["uniform", "distance"],
+    "regressor__model__n_neighbors": [10],
+    "regressor__model__weights": ["distance"],
     "regressor__model__metric": ["euclidean"],
     "regressor__preprocessing__scaler": [StandardScaler()],
     "regressor__preprocessing__feature_selection": [PCA(n_components=50)],
-    "regressor__preprocessing__text_features__description_bow__max_features": [1, 300],
+    "regressor__preprocessing__text_features__description_bow__max_features": [1],
     "regressor__preprocessing__text_features__edition_bow__max_features": [400],
 }
 
@@ -1571,7 +1605,7 @@ grid_search_knn.fit(X_train, y_train)
 train_mae_knn = evaluate_model(grid_search_knn, X_train, y_train)
 
 # %% [markdown]
-# This is defenetly underfitting but I do feel like there are better models for this so I will leave it as is and
+# This is defenetly overfitting but I do feel like there are better models for this so I will leave it as is and
 # not tune it too much.
 
 # %% [markdown]
@@ -1584,26 +1618,27 @@ train_mae_knn = evaluate_model(grid_search_knn, X_train, y_train)
 full_pipeline_rf = create_pipeline(preprocessing_pipeline_rf, RandomForestRegressor(random_state=rngs), transform_target=True)
 
 # param_grid_rf = {
-#     "regressor__preprocessing__text_features__description_bow__max_features": [1],
+#     "regressor__preprocessing__text_features__description_bow__max_features": [1, 500],
 #     "regressor__preprocessing__text_features__edition_bow__max_features": [1],
 #     "regressor__preprocessing__scaler": [None],
 #     "regressor__preprocessing__feature_selection": [None],
-#     "regressor__model__n_estimators": [100],
-#     "regressor__model__max_depth": [12],
-#     "regressor__model__min_samples_split": [20],
-#     "regressor__model__min_samples_leaf": [10],
+#     "regressor__model__n_estimators": [100, 150],
+#     "regressor__model__max_depth": [12, 15],
+#     "regressor__model__min_samples_split": [10, 20],
+#     "regressor__model__min_samples_leaf": [5, 10],
 #     "regressor__model__max_features": ["sqrt"],
+#     "regressor__model__bootstrap": [True],
 # }
 
 param_grid_rf = {
-    "regressor__preprocessing__text_features__description_bow__max_features": [1, 500],
+    "regressor__preprocessing__text_features__description_bow__max_features": [1],
     "regressor__preprocessing__text_features__edition_bow__max_features": [1],
     "regressor__preprocessing__scaler": [None],
     "regressor__preprocessing__feature_selection": [None],
-    "regressor__model__n_estimators": [100, 150],
-    "regressor__model__max_depth": [12, 15],
-    "regressor__model__min_samples_split": [10, 20],
-    "regressor__model__min_samples_leaf": [5, 10],
+    "regressor__model__n_estimators": [100],
+    "regressor__model__max_depth": [12],
+    "regressor__model__min_samples_split": [20],
+    "regressor__model__min_samples_leaf": [10],
     "regressor__model__max_features": ["sqrt"],
     "regressor__model__bootstrap": [True],
 }
@@ -1636,34 +1671,35 @@ full_pipeline_gb = Pipeline(
 full_pipeline_gb = TransformedTargetRegressor(regressor=full_pipeline_gb, transformer=PowerTransformer(method="yeo-johnson"))
 
 # param_grid_gb = {
-#     "regressor__preprocessing__text_features__description_bow__max_features": [1],
+#     "regressor__drop_published_date__columns_to_drop": [None, ["Published_Date"]],
+#     "regressor__preprocessing__text_features__description_bow__max_features": [1, 1000],
 #     "regressor__preprocessing__text_features__edition_bow__max_features": [500],
 #     "regressor__preprocessing__scaler": [None],
-#     "regressor__preprocessing__feature_selection": [None],
-#     "regressor__model__n_estimators": [200],
-#     "regressor__model__max_depth": [7],
-#     "regressor__model__learning_rate": [0.05],
+#     "regressor__preprocessing__feature_selection": [
+#         None,
+#     ],
+#     "regressor__model__n_estimators": [200, 250],
+#     "regressor__model__max_depth": [6, 7, 8],
+#     "regressor__model__learning_rate": [0.05, 0.07],
 #     "regressor__model__subsample": [0.8],
 #     "regressor__model__min_samples_split": [5],
-#     "regressor__model__min_samples_leaf": [5],
-#     "regressor__model__max_features": [None],
+#     "regressor__model__min_samples_leaf": [3, 5],
+#     "regressor__model__max_features": [None, "sqrt"],
 # }
 
 param_grid_gb = {
-    "regressor__drop_published_date__columns_to_drop": [None, ["Published_Date"]],
-    "regressor__preprocessing__text_features__description_bow__max_features": [1, 1000],
+    "regressor__drop_published_date__columns_to_drop": [["Published_Date"]],
+    "regressor__preprocessing__text_features__description_bow__max_features": [1],
     "regressor__preprocessing__text_features__edition_bow__max_features": [500],
     "regressor__preprocessing__scaler": [None],
-    "regressor__preprocessing__feature_selection": [
-        None,
-    ],
-    "regressor__model__n_estimators": [200, 250],
-    "regressor__model__max_depth": [6, 7, 8],
-    "regressor__model__learning_rate": [0.05, 0.07],
+    "regressor__preprocessing__feature_selection": [None],
+    "regressor__model__n_estimators": [250],
+    "regressor__model__max_depth": [7],
+    "regressor__model__learning_rate": [0.07],
     "regressor__model__subsample": [0.8],
     "regressor__model__min_samples_split": [5],
-    "regressor__model__min_samples_leaf": [3, 5],
-    "regressor__model__max_features": [None, "sqrt"],
+    "regressor__model__min_samples_leaf": [3],
+    "regressor__model__max_features": [None],
 }
 
 grid_search_gb = GridSearchCV(full_pipeline_gb, param_grid_gb, cv=tscv, scoring="neg_mean_absolute_error", n_jobs=-1, verbose=2)
@@ -1677,16 +1713,6 @@ train_mae_gb = evaluate_model(grid_search_gb, X_train, y_train)
 # Best Params: {'regressor__drop_published_date__columns_to_drop': ['Published_Date'], 'regressor__model__learning_rate': 0.07, 'regressor__model__max_depth': 7, 'regressor__model__max_features': None, 'regressor__model__min_samples_leaf': 3, 'regressor__model__min_samples_split': 5, 'regressor__model__n_estimators': 250, 'regressor__model__subsample': 0.8, 'regressor__preprocessing__feature_selection': None, 'regressor__preprocessing__scaler': None, 'regressor__preprocessing__text_features__description_bow__max_features': 1, 'regressor__preprocessing__text_features__edition_bow__max_features': 500}
 # CV: 848,807 | Train: 561,231
 # ```
-
-# %% [markdown]
-# ## What is happening why are our errors so big ? (and why is there a such a big difference between train and test ?)
-#
-# I do feel like the main culprit is the difference between how we have created the Train set and test set.
-#
-# using a timeseries split resulted in training and test having vastly different means. as we can see below.
-# There is a difference in the mean price.
-#
-# I do believe this is  the cause of the big error we are finding. Our models are just not properly picking up the price trends.
 
 # %%
 
@@ -1743,12 +1769,49 @@ print(f"  Train MAE: {train_mae:,.2f}")
 print(f"  Test MAE: {test_mae:,.2f}")
 
 
+# %% [markdown]
+# ## What is happening why are our errors so big ? (and why is there a such a big difference between train and test ?)
+#
+# I do feel like the main culprit is the difference between how we have created the Train set and test set.
+#
+# using a timeseries split resulted in training and test having vastly different means. as we can see below.
+# There is a difference in the mean price.
+#
+# I do believe this is  the cause of the big error we are finding. Our models are just not properly picking up the price trends.
+
 # %%
-print(f"\nTrain: {df_train['Published_Date'].min()} to {df_train['Published_Date'].max()}")
+print(f"Train: {df_train['Published_Date'].min()} to {df_train['Published_Date'].max()}")
 print(f"Test: {df_test['Published_Date'].min()} to {df_test['Published_Date'].max()}")
 
-print(f"\nMean prices:")
+print(f"Mean prices:")
 print(f"Train: {df_train['Price'].mean():,.0f}")
 print(f"Test: {df_test['Price'].mean():,.0f}")
 
+# %% [markdown]
+# Seen that we have such a big differene in the mean between the train and test it explains the inaccuracy
+
+# %% [markdown]
+# # What can we do?
+
+# %% [markdown]
+# We could:
+# 1. Use shuffle split instead of TimeSeries. This will give us a better distributaion of the price but the model would be useless.
+#    What do we care about a model  that can only predict past price ?
+# 2. We could do some pretty extreme clipping in the hopes that this will trim the test set (again we are leaking by having this knowedge) and we are also clipping too much. I can argue that all those really high prices (mainly of Range Rovers) are competely valid. RangeRovers are new and an average range rover of that model does go for that price...
+#
+#
+# So both solutions are not suitable.
+#
+
+# %% [markdown]
+# # Conclusion
+
+# %% [markdown]
+# ------------------
+# The error although seemingly big is actually not that bad when you compare it with the dummy
+
 # %%
+dummy_mae/test_mae
+
+# %% [markdown]
+# We have an over 3.5X improvement over the dummy.
