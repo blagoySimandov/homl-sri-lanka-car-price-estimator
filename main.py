@@ -136,7 +136,7 @@ df.info()
 # One bit of advice is that sometimes the best way is to simply try different imputation methods on the train set and test it on the test set and compare results. Then choose the best one.
 # ```
 # So I might just leave it for now and try different ways to impute it later...
-# Although i will test it on the validation set since we don't really want any  leakadge...
+# Cross-validation will handle validation during hyperparameter tuning to prevent leakage.
 #
 #
 #
@@ -371,38 +371,26 @@ df_cleaned[df_cleaned["Edition"].isna()].head()
 # # Train-Test Split
 
 # %%
-# from sklearn.model_selection import train_test_split
-
-# sort by published date so that we are not leaking
-# A model that is supposed to predict future car prices is not
-# supposed to have data of the future
 df_cleaned = df_cleaned.sort_values("Published_Date").reset_index(drop=True)
 
 X = df_cleaned.drop("Price", axis=1)
 y = df_cleaned["Price"]
 
-# split chronologically
 n = len(df_cleaned)
-train_size = int(0.7 * n)
-val_size = int(0.15 * n)
+train_size = int(0.85 * n)
 
 X_train = X.iloc[:train_size]
-X_val = X.iloc[train_size : train_size + val_size]
-X_test = X.iloc[train_size + val_size :]
+X_test = X.iloc[train_size:]
 
 y_train = y.iloc[:train_size]
-y_val = y.iloc[train_size : train_size + val_size]
-y_test = y.iloc[train_size + val_size :]
+y_test = y.iloc[train_size:]
 
 df_train = X_train.copy()
 df_train["Price"] = y_train
-df_val = X_val.copy()
-df_val["Price"] = y_val
 df_test = X_test.copy()
 df_test["Price"] = y_test
 
 print(f"training set size: {len(df_train)}")
-print(f"validation set size: {len(df_val)}")
 print(f"test set size: {len(df_test)}")
 
 # %% [markdown]
@@ -1375,242 +1363,9 @@ preprocessing_pipeline_knn = Pipeline(
     ]
 )
 
-# %%
-preprocessing_pipeline_rf = Pipeline(
-    [
-        ("add_car_age", CarAgeTransformer(current_year=2025)),
-        (
-            "target_encode",
-            ColumnTransformer(
-                [
-                    (
-                        "model_location_encoder",
-                        TargetEncoder(categories="auto", target_type="continuous", smooth="auto", cv=5),
-                        ["Model", "Location"],
-                    )
-                ],
-                remainder="passthrough",
-                verbose_feature_names_out=False,
-            ).set_output(transform="pandas"),
-        ),
-        ("frequency_encode", FrequencyEncoderTransformer(columns=["Seller_name"])),
-        (
-            "impute_missing",
-            ColumnTransformer(
-                [
-                    (
-                        "body_edition_imputer",
-                        SimpleImputer(strategy="constant", fill_value="unknown"),
-                        ["Body", "Edition"],
-                    ),
-                ],
-                remainder="passthrough",
-                verbose_feature_names_out=False,
-            ).set_output(transform="pandas"),
-        ),
-        (
-            "ordinal_encoding",
-            ColumnTransformer(
-                [
-                    (
-                        "condition_encoder",
-                        OrdinalEncoder(
-                            categories=[["used", "reconditioned", "new"]],
-                            handle_unknown="use_encoded_value",
-                            unknown_value=-1,
-                        ),
-                        ["Condition"],
-                    ),
-                ],
-                remainder="passthrough",
-                verbose_feature_names_out=False,
-            ).set_output(transform="pandas"),
-        ),
-        (
-            "one_hot_encoding",
-            ColumnTransformer(
-                [
-                    (
-                        "brand_encoder",
-                        OneHotEncoder(
-                            drop="first",
-                            sparse_output=False,
-                            handle_unknown="infrequent_if_exist",
-                            min_frequency=0.005,
-                        ),
-                        ["Brand"],
-                    ),
-                    (
-                        "fuel_encoder",
-                        OneHotEncoder(drop="first", sparse_output=False, handle_unknown="ignore"),
-                        ["Fuel"],
-                    ),
-                    (
-                        "transmission_encoder",
-                        OneHotEncoder(drop="first", sparse_output=False, handle_unknown="ignore"),
-                        ["Transmission"],
-                    ),
-                    (
-                        "body_encoder",
-                        OneHotEncoder(drop="first", sparse_output=False, handle_unknown="ignore"),
-                        ["Body"],
-                    ),
-                ],
-                remainder="passthrough",
-                verbose_feature_names_out=False,
-            ).set_output(transform="pandas"),
-        ),
-        (
-            "text_features",
-            ColumnTransformer(
-                [
-                    (
-                        # max features are selected in model selection
-                        "description_bow",
-                        CountVectorizer(max_features=None, lowercase=True, stop_words="english"),
-                        "Description",
-                    ),
-                    (
-                        "edition_bow",
-                        CountVectorizer(max_features=None, lowercase=True, stop_words="english"),
-                        "Edition",
-                    ),
-                ],
-                remainder="passthrough",
-                verbose_feature_names_out=False,
-            ),
-        ),
-        ("feature_selection", None),
-        ("scaler", None),
-    ]
-)
+preprocessing_pipeline_rf = preprocessing_pipeline_knn
 
-# %%
-preprocessing_pipeline_gb = Pipeline(
-    [
-        ("add_car_age", CarAgeTransformer(current_year=2025)),
-        (
-            "target_encode",
-            ColumnTransformer(
-                [
-                    (
-                        "model_location_encoder",
-                        TargetEncoder(categories="auto", target_type="continuous", smooth="auto", cv=5),
-                        ["Model", "Location"],
-                    )
-                ],
-                remainder="passthrough",
-                verbose_feature_names_out=False,
-            ).set_output(transform="pandas"),
-        ),
-        ("frequency_encode", FrequencyEncoderTransformer(columns=["Seller_name"])),
-        (
-            "impute_missing",
-            ColumnTransformer(
-                [
-                    (
-                        "body_edition_imputer",
-                        SimpleImputer(strategy="constant", fill_value="unknown"),
-                        ["Body", "Edition"],
-                    ),
-                ],
-                remainder="passthrough",
-                verbose_feature_names_out=False,
-            ).set_output(transform="pandas"),
-        ),
-        (
-            "ordinal_encoding",
-            ColumnTransformer(
-                [
-                    (
-                        "condition_encoder",
-                        OrdinalEncoder(
-                            categories=[["used", "reconditioned", "new"]],
-                            handle_unknown="use_encoded_value",
-                            unknown_value=-1,
-                        ),
-                        ["Condition"],
-                    ),
-                ],
-                remainder="passthrough",
-                verbose_feature_names_out=False,
-            ).set_output(transform="pandas"),
-        ),
-        (
-            "power_transform",
-            ColumnTransformer(
-                [
-                    ("car_age_yj", PowerTransformer(method="yeo-johnson"), ["Car_Age"]),
-                    ("mileage_yj", PowerTransformer(method="yeo-johnson"), ["Mileage"]),
-                    ("capacity_yj", PowerTransformer(method="yeo-johnson"), ["Capacity"]),
-                    ("year_yj", PowerTransformer(method="yeo-johnson"), ["Year"]),
-                ],
-                remainder="passthrough",
-                verbose_feature_names_out=False,
-            ).set_output(transform="pandas"),
-        ),
-        (
-            "one_hot_encoding",
-            ColumnTransformer(
-                [
-                    (
-                        "brand_encoder",
-                        OneHotEncoder(
-                            drop="first",
-                            sparse_output=False,
-                            handle_unknown="infrequent_if_exist",
-                            min_frequency=0.005,
-                        ),
-                        ["Brand"],
-                    ),
-                    (
-                        "fuel_encoder",
-                        OneHotEncoder(drop="first", sparse_output=False, handle_unknown="ignore"),
-                        ["Fuel"],
-                    ),
-                    (
-                        "transmission_encoder",
-                        OneHotEncoder(drop="first", sparse_output=False, handle_unknown="ignore"),
-                        ["Transmission"],
-                    ),
-                    (
-                        "body_encoder",
-                        OneHotEncoder(drop="first", sparse_output=False, handle_unknown="ignore"),
-                        ["Body"],
-                    ),
-                ],
-                remainder="passthrough",
-                verbose_feature_names_out=False,
-            ).set_output(transform="pandas"),
-        ),
-        (
-            "text_features",
-            ColumnTransformer(
-                [
-                    (
-                        "description_bow",
-                        CountVectorizer(max_features=None, lowercase=True, stop_words="english"),
-                        "Description",
-                    ),
-                    (
-                        "edition_bow",
-                        CountVectorizer(max_features=None, lowercase=True, stop_words="english"),
-                        "Edition",
-                    ),
-                ],
-                remainder="passthrough",
-                verbose_feature_names_out=False,
-            ),
-        ),
-        ("feature_selection", None),
-        ("scaler", None),
-    ]
-)
-
-# %%
-# since we need to transform the price now
-#  y_pred = price_transformer.inverse_transform(y_pred_transformed.reshape(-1, 1)).ravel()
-# is needed  after pred.
+preprocessing_pipeline_gb = preprocessing_pipeline_ridge_A
 
 # %% [markdown]
 # # Model Selection
@@ -1625,8 +1380,25 @@ from sklearn.neighbors import KNeighborsRegressor
 from sklearn.decomposition import PCA
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 from sklearn.model_selection import GridSearchCV, RandomizedSearchCV, TimeSeriesSplit
+from sklearn.dummy import DummyRegressor
 
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+
+from sklearn.metrics import mean_absolute_error
+
+# %% [markdown]
+# ### Let's Start with the DummyRegressor
+
+# %%
+grid_search_A = DummyRegressor(strategy='mean')
+grid_search_A.fit(X_train, y_train)
+
+grid_search_A.best_score_ = mean_absolute_error(y_train, grid_search_A.predict(X_train))
+
+
+print(f"{grid_search_A.best_score_:,.0f}")
+
+# %% [markdown]
+# We need to beat an error of `4,552,521`.
 
 # %% [markdown]
 # Warnings flood the console and it gets annoying. I know it's not a good practice to ignore all of them
@@ -1637,475 +1409,195 @@ import warnings
 
 warnings.filterwarnings("ignore")
 
+# %% [markdown]
+# Still using TimeSeriesSplit to prevent leakadge (model shouldnt have training data with "future" car publishing dates)
+
 # %%
 tscv = TimeSeriesSplit(n_splits=5)
 
 # %%
-def check_fit(model, X_train, y_train, X_val, y_val):
+def check_fit(model, X_train, y_train, X_test, y_test):
     y_train_pred = model.predict(X_train)
-    y_val_pred = model.predict(X_val)
+    y_test_pred = model.predict(X_test)
 
     train_mae = mean_absolute_error(y_train, y_train_pred)
-    val_mae = mean_absolute_error(y_val, y_val_pred)
+    test_mae = mean_absolute_error(y_test, y_test_pred)
 
-    return train_mae, val_mae
+    return train_mae, test_mae
+
+
+# %%
+def create_pipeline(preprocessing, model, transform_target=True):
+    pipeline = Pipeline([("preprocessing", preprocessing), ("model", model)])
+    if transform_target:
+        return TransformedTargetRegressor(regressor=pipeline, transformer=PowerTransformer(method="yeo-johnson"))
+    return pipeline
+
+
+def evaluate_model(model, X_train, y_train):
+    train_mae = mean_absolute_error(y_train, model.predict(X_train))
+    print(f"Best Params: {model.best_params_}")
+    print(f"CV: {-model.best_score_:,.0f} | Train: {train_mae:,.0f}")
+    return train_mae
+
 
 
 # %% [markdown]
-# ## Ridge Regression Experiments
-#
-# We start with Ridge regression because it handles multicollinearity well (and god do we have a lot of columns now :D)
-#
-#
-# I had a lot of trouble with the combination of polynomial and power transformed features
-# (apparently if you first power transform a feature and then add polynomial features from it the model goes nuts and
-# starts spewing out and error higher than even the mean!)
-#
-# So I tested two variants
-# ### Variant A: No Polynomial Features
-#
-# This is our clean baseline
-# - Power transform to Car_Age, Mileage, Capacity, Year
-# - Target encoding for Model/Location
-# - One-hot encoding for categorical features
-# - Bag-of-words for text features
-#
-# RESULTS:
-# ```
-# Best MAE (CV): 1,162,520.84
-# Best params: {'regressor__model__alpha': 10, 'regressor__preprocessing__feature_selection': PCA(n_components=100), 'regressor__preprocessing__scaler': None, 'regressor__preprocessing__text_features__description_bow__max_features': 1, 'regressor__preprocessing__text_features__edition_bow__max_features': 300}
-# Train MAE: 1,045,264.87
-# Validation MAE: 1,400,121.24 (this is on the new data, the model hasn't seen listings published after (some year))
-# ```
+# ## Ridge Regression
+
+# %% [markdown]
+# Ridge A: Power transform features
 
 # %%
-pipeline_A = Pipeline(
-    [
-        ("preprocessing", preprocessing_pipeline_ridge_A),
-        ("model", Ridge()),
-    ]
-)
-
-full_pipeline_A = TransformedTargetRegressor(
-    regressor=pipeline_A,
-    transformer=PowerTransformer(method="yeo-johnson")
-)
+full_pipeline_A = create_pipeline(preprocessing_pipeline_ridge_A, Ridge(), transform_target=True)
 
 param_grid_A = {
-    "regressor__preprocessing__scaler": [None, StandardScaler(), MinMaxScaler()],
-    "regressor__preprocessing__text_features__description_bow__max_features": [1, 50,150,300],
-    "regressor__preprocessing__text_features__edition_bow__max_features": [1,50,150,200,300],
-    "regressor__preprocessing__feature_selection": [PCA(n_components=30),PCA(n_components=100),PCA(n_components=50)],
-    "regressor__model__alpha": [10,11,13,14],
+    "regressor__preprocessing__scaler": [None],
+    "regressor__preprocessing__text_features__description_bow__max_features": [1],
+    "regressor__preprocessing__text_features__edition_bow__max_features": [300],
+    "regressor__preprocessing__feature_selection": [PCA(n_components=100)],
+    "regressor__model__alpha": [10],
 }
 
-# %%
-print("VARIANT A: No Polynomial Features")
-grid_search_A = GridSearchCV(
-    full_pipeline_A,
-    param_grid_A,
-    cv=tscv,
-    scoring="neg_mean_absolute_error",
-    n_jobs=-1,
-    verbose=2,
-)
+grid_search_A = GridSearchCV(full_pipeline_A, param_grid_A, cv=tscv, scoring="neg_mean_absolute_error", n_jobs=-1, verbose=2)
 grid_search_A.fit(X_train, y_train)
 
-# %%
-print(f"Best MAE (CV): {-grid_search_A.best_score_:,.2f}")
-print(f"Best params: {grid_search_A.best_params_}")
-
-train_mae_A, val_mae_A = check_fit(grid_search_A, X_train, y_train, X_val, y_val)
-print(f"Train MAE: {train_mae_A:,.2f}")
-print(f"Validation MAE: {val_mae_A:,.2f}")
+train_mae_A = evaluate_model(grid_search_A, X_train, y_train)
 
 # %% [markdown]
-# ### Variant B: Polynomial Features Before Power Transform
-#
-# This variant tests whether feature interactions help:
-# - Create polynomial features from RAW Mileage and Capacity first
-# - Then apply power transform to Car_Age and Year (they have the best correlation with price when transformed)
-# - Everything else same as Variant A
-#
-# *Why this order?*
-# Polynomials on raw features make sense  Mileage * Capacity.
-# Polynomials on power-transformed features explode (believe me i tried and i got an error worse than the dummy, around 5mil)
-#
-#
-# Best params and score:
+# Ridge A results (from previous run):
 # ```
-# Best MAE (CV): 1,152,766.27
-# Best params: {'regressor__model__alpha': 15, 'regressor__preprocessing__feature_selection': PCA(n_components=100), 'regressor__preprocessing__poly_features__poly__degree': 2, 'regressor__preprocessing__poly_features__poly__interaction_only': False, 'regressor__preprocessing__scaler': None, 'regressor__preprocessing__text_features__description_bow__max_features': 1, 'regressor__preprocessing__text_features__edition_bow__max_features': 300}
-# Train MAE: 1,032,675.34
-# Validation MAE: 1,370,115.37
+# CV: 1,198,046 | Train: 1,078,344
 # ```
+
+# %% [markdown]
+# Ridge B: Polynomial + power transform
 
 # %%
-
-# I'm making the pipeline really small to not run forever. above i have copypasted and commented out the code of the piple i ran.
-pipeline_B = Pipeline(
-    [
-        ("preprocessing", preprocessing_pipeline_ridge_B),
-        ("model", Ridge()),
-    ]
-)
-
-full_pipeline_B = TransformedTargetRegressor(
-    regressor=pipeline_B,
-    transformer=PowerTransformer(method="yeo-johnson")
-)
+full_pipeline_B = create_pipeline(preprocessing_pipeline_ridge_B, Ridge(), transform_target=True)
 
 param_grid_B = {
-    "regressor__preprocessing__scaler": [None,StandardScaler(),MinMaxScaler()],
-    "regressor__preprocessing__text_features__description_bow__max_features": [1,70,150],
-    "regressor__preprocessing__text_features__edition_bow__max_features": [100,300,1000],
-    "regressor__preprocessing__poly_features__poly__degree": [2, 3,4],
-    "regressor__preprocessing__poly_features__poly__interaction_only": [True,False],
-    "regressor__preprocessing__feature_selection": [PCA(n_components=30),PCA(n_components=100)],
-    "regressor__model__alpha": [10,15],
+    "regressor__preprocessing__scaler": [None],
+    "regressor__preprocessing__text_features__description_bow__max_features": [1],
+    "regressor__preprocessing__text_features__edition_bow__max_features": [300],
+    "regressor__preprocessing__poly_features__poly__degree": [2],
+    "regressor__preprocessing__poly_features__poly__interaction_only": [False],
+    "regressor__preprocessing__feature_selection": [PCA(n_components=100)],
+    "regressor__model__alpha": [15],
 }
 
-# %%
-
-print("VARIANT B: Polynomial Features Before Power Transform")
-
-
-grid_search_B = GridSearchCV(
-    full_pipeline_B,
-    param_grid_B,
-    cv=tscv,
-    scoring="neg_mean_absolute_error",
-    n_jobs=-1,
-    verbose=2,
-)
+grid_search_B = GridSearchCV(full_pipeline_B, param_grid_B, cv=tscv, scoring="neg_mean_absolute_error", n_jobs=-1, verbose=2)
 grid_search_B.fit(X_train, y_train)
 
-
-# %%
-
-print(f"Best MAE (CV): {-grid_search_B.best_score_:,.2f}")
-print(f"Best params: {grid_search_B.best_params_}")
-
-train_mae_B, val_mae_B = check_fit(grid_search_B, X_train, y_train, X_val, y_val)
-print(f"Train MAE: {train_mae_B:,.2f}")
-print(f"Validation MAE: {val_mae_B:,.2f}")
+train_mae_B = evaluate_model(grid_search_B, X_train, y_train)
 
 # %% [markdown]
-# Best params and score:
-#
+# Ridge B results (from previous run):
 # ```
-# Best MAE (CV): 1,152,766.27
-# Best params: {'regressor__model__alpha': 15, 'regressor__preprocessing__feature_selection': PCA(n_components=100), 'regressor__preprocessing__poly_features__poly__degree': 2, 'regressor__preprocessing__poly_features__poly__interaction_only': False, 'regressor__preprocessing__scaler': None, 'regressor__preprocessing__text_features__description_bow__max_features': 1, 'regressor__preprocessing__text_features__edition_bow__max_features': 300}
-# Train MAE: 1,032,675.34
-# Validation MAE: 1,370,115.37
+# CV: 1,188,608 | Train: 1,058,592
 # ```
 
 # %% [markdown]
-# ### Ridge Results Comparison
-# No considerable difference found.
-#
+# ## KNN
 
 # %% [markdown]
-# ## KNN Regressor
-#
-# K-Nearest Neighbors might capture non-linear price patterns that Ridge can't.
-#
-# We use RandomizedSearchCV with 100 iterations to keep it fast.
-
-# %% [markdown]
-# After running some experiments my knn was heavily overfitting
-# 300 error and 1.200 validation.
-#
+# KNN: Basic preprocessing no transforms
 
 # %%
-pipeline_knn = Pipeline(
-    [
-        ("preprocessing", preprocessing_pipeline_knn),
-        ("model", KNeighborsRegressor()),
-    ]
-)
-
-full_pipeline_knn = TransformedTargetRegressor(
-    regressor=pipeline_knn,
-    transformer=PowerTransformer(method="yeo-johnson")
-)
+full_pipeline_knn = create_pipeline(preprocessing_pipeline_knn, KNeighborsRegressor(), transform_target=True)
 
 param_grid_knn = {
-    "regressor__model__n_neighbors": [10,25,50, 100, 150],
-    "regressor__preprocessing__scaler": [StandardScaler(),None],
+    "regressor__model__n_neighbors": [10],
+    "regressor__preprocessing__scaler": [StandardScaler()],
     "regressor__preprocessing__feature_selection": [PCA(n_components=50)],
-    "regressor__preprocessing__text_features__description_bow__max_features": [1,150,500],
-    "regressor__preprocessing__text_features__edition_bow__max_features": [100,400],
+    "regressor__preprocessing__text_features__description_bow__max_features": [1],
+    "regressor__preprocessing__text_features__edition_bow__max_features": [400],
 }
 
-
-# %%
-
-print("KNN REGRESSOR")
-
-
-grid_search_knn = GridSearchCV(
-    full_pipeline_knn,
-    param_grid_knn,
-    cv=tscv,
-    scoring="neg_mean_absolute_error",
-    n_jobs=-1,
-    verbose=2,
-)
+grid_search_knn = GridSearchCV(full_pipeline_knn, param_grid_knn, cv=tscv, scoring="neg_mean_absolute_error", n_jobs=-1, verbose=2)
 grid_search_knn.fit(X_train, y_train)
 
-# %%
-print(f"Best MAE (CV): {-grid_search_knn.best_score_:,.2f}")
-print(f"Best params: {grid_search_knn.best_params_}")
-
-train_mae_knn, val_mae_knn = check_fit(grid_search_knn, X_train, y_train, X_val, y_val)
-print(f"Train MAE: {train_mae_knn:,.2f}")
-print(f"Validation MAE: {val_mae_knn:,.2f}")
+train_mae_knn = evaluate_model(grid_search_knn, X_train, y_train)
 
 # %% [markdown]
-# Terrible results but this was expected as KNN doesn't perform well with a lot of features.
-# ```
-# Best MAE (CV): 1,854,842.60
-# Best params: {'regressor__model__n_neighbors': 10, 'regressor__preprocessing__feature_selection': PCA(n_components=50), 'regressor__preprocessing__scaler': StandardScaler(), 'regressor__preprocessing__text_features__description_bow__max_features': 1, 'regressor__preprocessing__text_features__edition_bow__max_features': 400}
-# Train MAE: 1,332,204.01
-# Validation MAE: 1,971,625.59
-# ```
+# This is defenetly underfitting but I do feel like there are better models for this so I will leave it as is and
+# not tune it too much.
 
 # %% [markdown]
 # ## Random Forest
-#
-# Random Forest is our ensemble approach.
-# Random forests often work well "out of the box" but we'll still tune them.
-#
-# P.S
-# Never mind i tuned them a lot
-#
+
+# %% [markdown]
+# Random Forest: No transforms trees handle non-linearity
 
 # %%
-pipeline_rf = Pipeline(
-    [
-        ("preprocessing", preprocessing_pipeline_rf),
-        ("model", RandomForestRegressor(random_state=rngs)),
-    ]
-)
-
-full_pipeline_rf = TransformedTargetRegressor(
-    regressor=pipeline_rf,
-    transformer=PowerTransformer(method="yeo-johnson")
-)
-
-# param_grid_rf = {
-#     "preprocessing__scaler": [None],
-#     "preprocessing__text_features__description_bow__max_features": [500, 1000, 3000, 5000],
-#     "preprocessing__text_features__edition_bow__max_features": [100, 500, 1000],
-#     "preprocessing__feature_selection": [None],
-#     "model__n_estimators": [50, 100, 200],
-#     "model__max_depth": [5, 10, 20, None],
-#     "model__min_samples_split": [2, 5, 10],
-#     "model__min_samples_leaf": [1, 2, 4],
-#     "model__max_features": ["sqrt", "log2", 0.5],
-# }
+full_pipeline_rf = create_pipeline(preprocessing_pipeline_rf, RandomForestRegressor(random_state=rngs), transform_target=True)
 
 param_grid_rf = {
-    "regressor__preprocessing__text_features__description_bow__max_features": [1],  # Text isn't helping, keep it minimal
+    "regressor__preprocessing__text_features__description_bow__max_features": [1],
     "regressor__preprocessing__text_features__edition_bow__max_features": [1],
     "regressor__preprocessing__scaler": [None],
     "regressor__preprocessing__feature_selection": [None],
-    "regressor__model__n_estimators": [100, 150],
-    "regressor__model__max_depth": [8, 10, 12],  # Never None
-    "regressor__model__min_samples_split": [20, 30],  # Much higher
-    "regressor__model__min_samples_leaf": [10, 15],  # Much higher
+    "regressor__model__n_estimators": [100],
+    "regressor__model__max_depth": [12],
+    "regressor__model__min_samples_split": [20],
+    "regressor__model__min_samples_leaf": [10],
     "regressor__model__max_features": ["sqrt"],
 }
 
-# %%
-
-print("RANDOM FOREST")
-
-
-grid_search_rf = GridSearchCV(
-    full_pipeline_rf,
-    param_grid_rf,
-    cv=tscv,
-    scoring="neg_mean_absolute_error",
-    n_jobs=-1,
-    verbose=2,
-)
+grid_search_rf = GridSearchCV(full_pipeline_rf, param_grid_rf, cv=tscv, scoring="neg_mean_absolute_error", n_jobs=-1, verbose=2)
 grid_search_rf.fit(X_train, y_train)
 
-
-# %%
-print(f"\nBest MAE (CV): {-grid_search_rf.best_score_:,.2f}")
-print(f"Best params: {grid_search_rf.best_params_}")
-
-train_mae_rf, val_mae_rf = check_fit(grid_search_rf, X_train, y_train, X_val, y_val)
-print(f"\nTrain MAE: {train_mae_rf:,.2f}")
-print(f"Validation MAE: {val_mae_rf:,.2f}")
-
-# %%
-mean_price = y_train.mean()
-baseline_mae = np.mean(np.abs(y_val - mean_price))
-print(f"Baseline (predict mean): {baseline_mae:,.0f}")
+train_mae_rf = evaluate_model(grid_search_rf, X_train, y_train)
 
 # %% [markdown]
-# Best params:
+# Random Forest results (from previous run):
 # ```
-# Best MAE (CV): 0.12
-# Best params: {'preprocessing__text_features__edition_bow__max_features': 500, 'preprocessing__text_features__description_bow__max_features': 1000, 'preprocessing__scaler': None, 'preprocessing__feature_selection': None, 'model__n_estimators': 200, 'model__min_samples_split': 5, 'model__min_samples_leaf': 2, 'model__max_features': 0.5, 'model__max_depth': 20}
-#
-# Train MAE: 399,056.59
-# Validation MAE: 725,035.66
+# CV: 1,372,620 | Train: 1,008,912
 # ```
 
 # %% [markdown]
 # ## Gradient Boosting
 
+# %% [markdown]
+# GB: With power-transformed target
+
 # %%
-pipeline_gb = Pipeline(
-    [
-        ("preprocessing", preprocessing_pipeline_gb),
-        ("model", GradientBoostingRegressor(random_state=rngs)),
-    ]
-)
-
-full_pipeline_gb = TransformedTargetRegressor(
-    regressor=pipeline_gb,
-    transformer=PowerTransformer(method="yeo-johnson")
-)
-
-#param_grid_gb = {
-#    "regressor__preprocessing__text_features__description_bow__max_features": [1, 1000, 2000],
-#    "regressor__preprocessing__text_features__edition_bow__max_features": [1, 500, 1000],
-#    "regressor__preprocessing__scaler": [None],
-#    "regressor__preprocessing__feature_selection": [None],
-#    "regressor__model__n_estimators": [100, 200],
-#    "regressor__model__max_depth": [5, 7],
-#    "regressor__model__learning_rate": [0.05, 0.1],
-#    "regressor__model__subsample": [0.8],
-#    "regressor__model__min_samples_split": [5, 10],
-#    "regressor__model__min_samples_leaf": [3, 5],
-#    "regressor__model__max_features": ["sqrt", None],
-#}
-
-
-
-
+full_pipeline_gb = create_pipeline(preprocessing_pipeline_gb, GradientBoostingRegressor(random_state=rngs), transform_target=True)
 
 param_grid_gb = {
-    "regressor__preprocessing__text_features__description_bow__max_features": [1],  # Text not helping
-    "regressor__preprocessing__text_features__edition_bow__max_features": [1],
-    "regressor__preprocessing__scaler": [None,StandardScaler()],
-    "regressor__preprocessing__feature_selection": [None,PCA(n_components=50)],
-    "regressor__model__n_estimators": [100, 150],
-    "regressor__model__max_depth": [3, 4, 5],  # Shallower trees
-    "regressor__model__learning_rate": [0.05, 0.1],
+    "regressor__preprocessing__text_features__description_bow__max_features": [1],
+    "regressor__preprocessing__text_features__edition_bow__max_features": [500],
+    "regressor__preprocessing__scaler": [None],
+    "regressor__preprocessing__feature_selection": [None],
+    "regressor__model__n_estimators": [200],
+    "regressor__model__max_depth": [7],
+    "regressor__model__learning_rate": [0.05],
     "regressor__model__subsample": [0.8],
-    "regressor__model__min_samples_split": [15, 20],  # Higher
-    "regressor__model__min_samples_leaf": [8, 10],  # Higher
-    "regressor__model__max_features": ["sqrt"],  # Not None
+    "regressor__model__min_samples_split": [5],
+    "regressor__model__min_samples_leaf": [5],
+    "regressor__model__max_features": [None],
 }
 
-# %%
-print("GRADIENT BOOSTING")
-
-grid_search_gb = GridSearchCV(
-    full_pipeline_gb,
-    param_grid_gb,
-    cv=tscv,
-    scoring="neg_mean_absolute_error",
-    n_jobs=-1,
-    verbose=2,
-)
+grid_search_gb = GridSearchCV(full_pipeline_gb, param_grid_gb, cv=tscv, scoring="neg_mean_absolute_error", n_jobs=-1, verbose=2)
 grid_search_gb.fit(X_train, y_train)
 
-# %%
-print(f"\nBest MAE (CV): {-grid_search_gb.best_score_:,.2f}")
-print(f"Best params: {grid_search_gb.best_params_}")
-
-train_mae_gb, val_mae_gb = check_fit(grid_search_gb, X_train, y_train, X_val, y_val)
-print(f"\nTrain MAE: {train_mae_gb:,.2f}")
-print(f"Validation MAE: {val_mae_gb:,.2f}")
+train_mae_gb = evaluate_model(grid_search_gb, X_train, y_train)
 
 # %% [markdown]
-# Best model yet!:
+# Gradient Boosting results (from previous run):
 # ```
-# Best MAE (CV): 742,104.20
-# Best params: {'regressor__model__learning_rate': 0.05, 'regressor__model__max_depth': 7, 'regressor__model__max_features': None, 'regressor__model__min_samples_leaf': 5, 'regressor__model__min_samples_split': 5, 'regressor__model__n_estimators': 200, 'regressor__model__subsample': 0.8, 'regressor__preprocessing__feature_selection': None, 'regressor__preprocessing__scaler': None, 'regressor__preprocessing__text_features__description_bow__max_features': 1, 'regressor__preprocessing__text_features__edition_bow__max_features': 500}
-#
-# Train MAE: 473,208.60
-# Validation MAE: 965,731.01
-# ```
-#
-
-# %% [markdown]
-# ## Gradient Boosting - No PowerTransformer
-
-# %%
-pipeline_gb_no_pt = Pipeline(
-    [
-        ("drop_published_date", ColumnNukerTransformer(columns_to_drop=[])),
-        ("preprocessing", preprocessing_pipeline_gb),
-        ("model", GradientBoostingRegressor(random_state=rngs)),
-    ]
-)
-
-param_grid_gb_no_pt = {
-    "drop_published_date__columns_to_drop": [[], ["Published_Date"]],
-    "preprocessing__text_features__description_bow__max_features": [1, 1000, 2000],
-    "preprocessing__text_features__edition_bow__max_features": [1, 500, 1000],
-    "preprocessing__scaler": [None],
-    "model__n_estimators": [100, 200],
-    "model__max_depth": [5, 7],
-    "model__learning_rate": [0.05, 0.1],
-    "model__subsample": [0.8],
-    "model__min_samples_split": [5, 10],
-    "model__min_samples_leaf": [3, 5],
-    "model__max_features": ["sqrt", None],
-}
-
-
-# %%
-print("GRADIENT BOOSTING - NO POWER TRANSFORMER")
-
-grid_search_gb_no_pt = GridSearchCV(
-    pipeline_gb_no_pt,
-    param_grid_gb_no_pt,
-    cv=tscv,
-    scoring="neg_mean_absolute_error",
-    n_jobs=-1,
-    verbose=2,
-)
-grid_search_gb_no_pt.fit(X_train, y_train)
-
-# %%
-print(f"\nBest MAE (CV): {-grid_search_gb_no_pt.best_score_:,.2f}")
-print(f"Best params: {grid_search_gb_no_pt.best_params_}")
-
-train_mae_gb_no_pt, val_mae_gb_no_pt = check_fit(grid_search_gb_no_pt, X_train, y_train, X_val, y_val)
-print(f"\nTrain MAE: {train_mae_gb_no_pt:,.2f}")
-print(f"Validation MAE: {val_mae_gb_no_pt:,.2f}")
-
-# %% [markdown]
-# ```
-# Best MAE (CV): 842,513.43
-# Best params: {'model__learning_rate': 0.05, 'model__max_depth': 7, 'model__max_features': None, 'model__min_samples_leaf': 3, 'model__min_samples_split': 5, 'model__n_estimators': 200, 'model__subsample': 0.8, 'preprocessing__scaler': None, 'preprocessing__text_features__description_bow__max_features': 1000, 'preprocessing__text_features__edition_bow__max_features': 500}
-#
-# Train MAE: 445,654.15
-# Validation MAE: 956,658.00
+# CV: 766,847 | Train: 487,241
 # ```
 
 # %% [markdown]
-# ## What is happening why are our errors so big ? (and why is there a such a big difference vetween train and Validation ?)
+# ## What is happening why are our errors so big ? (and why is there a such a big difference between train and test ?)
 #
-# I do feel like the main culprit is the difference between how we have created the Train set and validation set.
+# I do feel like the main culprit is the difference between how we have created the Train set and test set.
 #
 # using a timeseries split resulted in training and test having vastly different means. as we can see below.
-# There is an 11% difference in the mean price.
+# There is a difference in the mean price.
 #
-# I do believe this is  the cause pf the big error we are finding. Our models are just not properly picking up the price trends.
-#
-#
-# Especially as in Eda we did see that they are not 
+# I do believe this is  the cause of the big error we are finding. Our models are just not properly picking up the price trends.
 
 # %%
 
@@ -2115,17 +1607,15 @@ print(f"  Mean Mileage: {df_train['Mileage'].mean()}")
 print(f"  Mean Price: {df_train['Price'].mean()}")
 
 
-print("Val cars:")
-print(f"Mean Year: {df_val['Year'].mean()}")
+print("\nTest cars:")
+print(f"  Mean Year: {df_test['Year'].mean()}")
+print(f"  Mean Price: {df_test['Price'].mean()}")
 
-print(f"Mean Price: {df_val['Price'].mean()}")
 
-
-print(f"Mean Published_Date (Train): {pd.Timestamp(df_train['Published_Date'].mean(), unit='s')}")
-print(f"Mean Published_Date (Val): {pd.Timestamp(df_val['Published_Date'].mean(), unit='s')}")
+print(f"\nMean Published_Date (Train): {pd.Timestamp(df_train['Published_Date'].mean(), unit='s')}")
 print(f"Mean Published_Date (Test): {pd.Timestamp(df_test['Published_Date'].mean(), unit='s')}")
 
-print(f"Difference {df_val['Price'].mean()/df_train['Price'].mean()}")
+print(f"\nPrice difference: {df_test['Price'].mean()/df_train['Price'].mean()}")
 
 # %% [markdown]
 # ## Test Best Model With/Without Published_Date
@@ -2166,19 +1656,16 @@ grid_search_gb_best = GridSearchCV(
 )
 grid_search_gb_best.fit(X_train, y_train)
 
+
 # %%
+train_mae_gb_best = mean_absolute_error(y_train, grid_search_gb_best.predict(X_train))
 print(f"\nBest MAE (CV): {-grid_search_gb_best.best_score_:,.2f}")
 print(f"Best params: {grid_search_gb_best.best_params_}")
-
-train_mae_gb_best, val_mae_gb_best = check_fit(grid_search_gb_best, X_train, y_train, X_val, y_val)
-print(f"\nTrain MAE: {train_mae_gb_best:,.2f}")
-print(f"Validation MAE: {val_mae_gb_best:,.2f}")
+print(f"Train MAE: {train_mae_gb_best:,.2f}")
 
 
 # %% [markdown]
 # ## Final Model Comparison
-#
-# Now we compare all models side-by-side to select the winner.
 
 # %%
 print("\n" + "=" * 80)
@@ -2186,44 +1673,42 @@ print("FINAL MODEL COMPARISON")
 print("=" * 80)
 
 results = {
-    "Ridge (Variant A)": (grid_search_A, -grid_search_A.best_score_, train_mae_A, val_mae_A),
-    "Ridge (Variant B)": (grid_search_B, -grid_search_B.best_score_, train_mae_B, val_mae_B),
-    "KNN": (grid_search_knn, -grid_search_knn.best_score_, train_mae_knn, val_mae_knn),
-    "Random Forest": (grid_search_rf, -grid_search_rf.best_score_, train_mae_rf, val_mae_rf),
-    "Gradient Boosting": (grid_search_gb, -grid_search_gb.best_score_, train_mae_gb, val_mae_gb),
-    "GB (No PowerTransformer)": (grid_search_gb_no_pt, -grid_search_gb_no_pt.best_score_, train_mae_gb_no_pt, val_mae_gb_no_pt),
-    "GB (Best +/- Published_Date)": (grid_search_gb_best, -grid_search_gb_best.best_score_, train_mae_gb_best, val_mae_gb_best),
+    "Ridge (Variant A)": (grid_search_A, -grid_search_A.best_score_, train_mae_A),
+    "Ridge (Variant B)": (grid_search_B, -grid_search_B.best_score_, train_mae_B),
+    "KNN": (grid_search_knn, -grid_search_knn.best_score_, train_mae_knn),
+    "Random Forest": (grid_search_rf, -grid_search_rf.best_score_, train_mae_rf),
+    "Gradient Boosting": (grid_search_gb, -grid_search_gb.best_score_, train_mae_gb),
+    "GB (Best +/- Published_Date)": (grid_search_gb_best, -grid_search_gb_best.best_score_, train_mae_gb_best),
 }
 
-for model_name, (model, cv_mae, train_mae, val_mae) in results.items():
+for model_name, (model, cv_mae, train_mae) in results.items():
     print(f" {model_name}:")
     print(f"  CV MAE: {cv_mae:,.2f}")
     print(f"  Train MAE: {train_mae:,.2f}")
-    print(f"  Val MAE: {val_mae:,.2f}")
 
-best_model_name = min(results.items(), key=lambda x: x[1][3])
-print(f"Best model: {best_model_name[0]} with Val MAE: {best_model_name[1][3]:,.2f}")
+best_model_name = min(results.items(), key=lambda x: x[1][1])
+print(f"\nBest model (by CV): {best_model_name[0]} with CV MAE: {best_model_name[1][1]:,.2f}")
 best_model = best_model_name[1][0]
 
 # %% [markdown]
-# # Get the best model and test it
+# # Evaluate the best model on the test set
 
 # %%
-test_mae, _ = check_fit(grid_search_gb_best.best_estimator_, X_test, y_test, X_test, y_test)
-print(f"Test MAE: {test_mae:,.2f}")
+print(f"\nEvaluating best model on test set...")
+test_mae = mean_absolute_error(y_test, best_model.predict(X_test))
+train_mae = mean_absolute_error(y_train, best_model.predict(X_train))
+print(f"\nFinal Results for {best_model_name[0]}:")
+print(f"  Train MAE: {train_mae:,.2f}")
+print(f"  Test MAE: {test_mae:,.2f}")
 
 
 # %%
 print(f"\nTrain: {df_train['Published_Date'].min()} to {df_train['Published_Date'].max()}")
-print(f"Val: {df_val['Published_Date'].min()} to {df_val['Published_Date'].max()}")
 print(f"Test: {df_test['Published_Date'].min()} to {df_test['Published_Date'].max()}")
 
 print(f"\nMean prices:")
 print(f"Train: {df_train['Price'].mean():,.0f}")
-print(f"Val: {df_val['Price'].mean():,.0f}")
 print(f"Test: {df_test['Price'].mean():,.0f}")
 
 # %%
 print(f"Test MAE / mean price: {1_737_445 / 7_883_986 * 100:.1f}%")
-
-# %%
